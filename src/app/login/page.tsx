@@ -151,25 +151,6 @@ export default function LoginPage() {
               Sign In
             </Button>
           </form>
-
-          {/* CREDENTIALS HINT CARD */}
-          <div className="mt-6 pt-5 border-t border-slate-700/60 text-xs text-slate-400 space-y-2">
-            <div className="font-semibold text-slate-300 uppercase tracking-wider text-[11px] mb-2">
-              Default Access Credentials:
-            </div>
-            <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-700/60 flex items-center justify-between font-mono text-[11px]">
-              <span className="flex items-center gap-1.5 text-indigo-400 font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5" /> Admin:
-              </span>
-              <span className="text-slate-200">admin / admin123</span>
-            </div>
-            <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-700/60 flex items-center justify-between font-mono text-[11px]">
-              <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                <UserCheck className="w-3.5 h-3.5" /> Driver:
-              </span>
-              <span className="text-slate-200">ramesh / ramesh123</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

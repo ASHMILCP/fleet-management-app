@@ -224,8 +224,19 @@ export class FleetStore {
 
   static deleteDriver(id: string): void {
     const drivers = this.getDrivers();
-    const filtered = drivers.filter((d) => d.id !== id);
-    setItem(STORAGE_KEYS.DRIVERS, filtered);
+    const filteredDrivers = drivers.filter((d) => d.id !== id);
+    setItem(STORAGE_KEYS.DRIVERS, filteredDrivers);
+
+    // Remove orphan duty sessions for deleted driver
+    const sessions = this.getDutySessions();
+    const filteredSessions = sessions.filter((s) => s.driver_id !== id);
+    setItem(STORAGE_KEYS.DUTY_SESSIONS, filteredSessions);
+
+    // If current user is the deleted driver, sign out
+    const current = this.getCurrentUser();
+    if (current && current.id === id) {
+      this.logout();
+    }
   }
 
   static toggleDriverStatus(id: string): void {
@@ -391,10 +402,14 @@ export class FleetStore {
   static getAdminMetrics(): AdminSummaryMetrics {
     const today = getTodayDateIST();
     const drivers = this.getDrivers();
+    const activeDriverIds = new Set(drivers.filter((d) => d.is_active).map((d) => d.id));
     const totalDrivers = drivers.length;
-    const activeDrivers = drivers.filter((d) => d.is_active).length;
+    const activeDrivers = activeDriverIds.size;
 
-    const activeSessions = this.getDutySessions().filter((s) => s.status === 'ACTIVE');
+    // Only count active duty sessions belonging to existing, active drivers
+    const activeSessions = this.getDutySessions().filter(
+      (s) => s.status === 'ACTIVE' && activeDriverIds.has(s.driver_id)
+    );
     const onDutyDrivers = activeSessions.length;
 
     const tripsToday = this.getTrips().filter((t) => t.trip_date === today);
