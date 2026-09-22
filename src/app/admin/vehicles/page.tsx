@@ -56,11 +56,15 @@ export default function AdminVehiclesPage() {
   };
 
   const filteredVehicles = vehicles.filter((v) => {
+    if (!v) return false;
     const query = searchQuery.toLowerCase();
+    const reg = v.registration_number || '';
+    const model = v.model || '';
+    const fuel = v.fuel_type || '';
     return (
-      v.registration_number.toLowerCase().includes(query) ||
-      v.model.toLowerCase().includes(query) ||
-      v.fuel_type.toLowerCase().includes(query)
+      reg.toLowerCase().includes(query) ||
+      model.toLowerCase().includes(query) ||
+      fuel.toLowerCase().includes(query)
     );
   });
 

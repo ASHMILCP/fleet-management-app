@@ -87,12 +87,17 @@ export default function AdminDriversPage() {
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
 
   const filteredDrivers = drivers.filter((d) => {
+    if (!d) return false;
     const query = searchQuery.toLowerCase();
+    const fullName = d.full_name || '';
+    const username = d.username || '';
+    const phone = d.phone || '';
+    const license = d.license_number || '';
     return (
-      d.full_name.toLowerCase().includes(query) ||
-      (d.username && d.username.toLowerCase().includes(query)) ||
-      (d.phone && d.phone.toLowerCase().includes(query)) ||
-      (d.license_number && d.license_number.toLowerCase().includes(query))
+      fullName.toLowerCase().includes(query) ||
+      username.toLowerCase().includes(query) ||
+      phone.toLowerCase().includes(query) ||
+      license.toLowerCase().includes(query)
     );
   });
 
@@ -176,17 +181,19 @@ export default function AdminDriversPage() {
                 const assignedVehicle = driver.assigned_vehicle_id
                   ? vehicleMap.get(driver.assigned_vehicle_id)
                   : null;
+                const displayName = driver.full_name || 'Unnamed Driver';
+                const initial = displayName.charAt(0).toUpperCase() || 'D';
 
                 return (
                   <tr key={driver.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-4 px-4 font-semibold text-slate-900">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center font-bold text-sm">
-                          {driver.full_name.charAt(0)}
+                          {initial}
                         </div>
                         <div>
-                          <div className="font-bold text-slate-900">{driver.full_name}</div>
-                          <div className="text-xs text-slate-400 font-normal">Role: {driver.role}</div>
+                          <div className="font-bold text-slate-900">{displayName}</div>
+                          <div className="text-xs text-slate-400 font-normal">Role: {driver.role || 'DRIVER'}</div>
                         </div>
                       </div>
                     </td>

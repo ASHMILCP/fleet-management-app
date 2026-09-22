@@ -57,11 +57,15 @@ export default function AdminCompaniesPage() {
   };
 
   const filteredCompanies = companies.filter((c) => {
+    if (!c) return false;
     const query = searchQuery.toLowerCase();
+    const name = c.name || '';
+    const contact = c.contact_person || '';
+    const phone = c.phone || '';
     return (
-      c.name.toLowerCase().includes(query) ||
-      (c.contact_person && c.contact_person.toLowerCase().includes(query)) ||
-      (c.phone && c.phone.toLowerCase().includes(query))
+      name.toLowerCase().includes(query) ||
+      contact.toLowerCase().includes(query) ||
+      phone.toLowerCase().includes(query)
     );
   });
 
