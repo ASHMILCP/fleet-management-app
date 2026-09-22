@@ -41,8 +41,14 @@ function getItem<T>(key: string, fallback: T): T {
   try {
     const isInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
     const data = localStorage.getItem(key);
-    if (data !== null) return JSON.parse(data);
-    return isInitialized === 'true' ? ([] as unknown as T) : fallback;
+    if (data !== null) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(fallback) && !Array.isArray(parsed)) {
+        return fallback;
+      }
+      return parsed;
+    }
+    return isInitialized === 'true' && Array.isArray(fallback) ? ([] as unknown as T) : fallback;
   } catch {
     return fallback;
   }
@@ -149,12 +155,12 @@ export class FleetStore {
         supabase.from('fuel_expenses').select('*'),
       ]);
 
-      if (vRes.data && vRes.data.length > 0) setItem(STORAGE_KEYS.VEHICLES, vRes.data);
-      if (cRes.data && cRes.data.length > 0) setItem(STORAGE_KEYS.COMPANIES, cRes.data);
-      if (pRes.data && pRes.data.length > 0) setItem(STORAGE_KEYS.DRIVERS, pRes.data);
-      if (dRes.data && dRes.data.length > 0) setItem(STORAGE_KEYS.DUTY_SESSIONS, dRes.data);
-      if (tRes.data && tRes.data.length > 0) setItem(STORAGE_KEYS.TRIPS, tRes.data);
-      if (fRes.data && fRes.data.length > 0) setItem(STORAGE_KEYS.FUEL_LOGS, fRes.data);
+      if (Array.isArray(vRes.data)) setItem(STORAGE_KEYS.VEHICLES, vRes.data);
+      if (Array.isArray(cRes.data)) setItem(STORAGE_KEYS.COMPANIES, cRes.data);
+      if (Array.isArray(pRes.data)) setItem(STORAGE_KEYS.DRIVERS, pRes.data);
+      if (Array.isArray(dRes.data)) setItem(STORAGE_KEYS.DUTY_SESSIONS, dRes.data);
+      if (Array.isArray(tRes.data)) setItem(STORAGE_KEYS.TRIPS, tRes.data);
+      if (Array.isArray(fRes.data)) setItem(STORAGE_KEYS.FUEL_LOGS, fRes.data);
 
       setItem(STORAGE_KEYS.INITIALIZED, 'true');
     } catch (err) {
@@ -516,11 +522,11 @@ export class FleetStore {
   // Today's Driver Summary
   static getDriverTodaySummary(driverId: string): DriverTodaySummary {
     const today = getTodayDateIST();
-    const sessions = this.getDutySessions().filter(
-      (s) => s.driver_id === driverId && s.start_time.startsWith(today)
-    );
+    const allSessions = this.getDutySessions();
+    const sessions = Array.isArray(allSessions)
+      ? allSessions.filter((s) => s && s.driver_id === driverId && s.start_time && String(s.start_time).startsWith(today))
+      : [];
 
-    // Active or most recent session for today
     const currentActive = this.getActiveDutySession(driverId);
     const primarySession = currentActive || sessions[0] || null;
 
@@ -529,17 +535,17 @@ export class FleetStore {
 
     const working = calculateWorkingHours(startTime, endTime);
 
-    // Trips today for this driver
-    const driverTripsToday = this.getTrips().filter(
-      (t) => t.driver_id === driverId && t.trip_date === today
-    );
+    const allTrips = this.getTrips();
+    const driverTripsToday = Array.isArray(allTrips)
+      ? allTrips.filter((t) => t && t.driver_id === driverId && t.trip_date === today)
+      : [];
     const totalTrips = driverTripsToday.length;
     const totalKm = driverTripsToday.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
 
-    // Fuel spent today for this driver
-    const driverFuelToday = this.getFuelLogs().filter(
-      (f) => f.driver_id === driverId && f.log_date === today
-    );
+    const allFuel = this.getFuelLogs();
+    const driverFuelToday = Array.isArray(allFuel)
+      ? allFuel.filter((f) => f && f.driver_id === driverId && f.log_date === today)
+      : [];
     const fuelExpense = driverFuelToday.reduce((sum, f) => sum + Number(f.amount || 0), 0);
 
     const fuelCostPerKm = totalKm > 0 ? parseFloat((fuelExpense / totalKm).toFixed(2)) : 0;
@@ -548,8 +554,8 @@ export class FleetStore {
       dutySession: primarySession,
       startTime,
       endTime,
-      workingHoursText: working.text,
-      workingHoursDecimal: working.hoursDecimal,
+      workingHoursText: working?.text || '0h 00m',
+      workingHoursDecimal: working?.hoursDecimal || 0,
       totalTrips,
       totalKm,
       fuelExpense,
