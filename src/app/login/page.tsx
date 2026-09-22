@@ -59,8 +59,8 @@ export default function LoginPage() {
       }
     }
 
-    // Local / Store Authentication Check
-    const user = FleetStore.authenticateUser(inputUser, inputPass);
+    // Cloud / Store Authentication Check
+    const user = await FleetStore.authenticateUserAsync(inputUser, inputPass);
     if (user) {
       FleetStore.setCurrentUser(user);
       if (user.role === 'ADMIN') {
