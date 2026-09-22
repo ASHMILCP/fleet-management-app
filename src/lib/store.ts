@@ -118,6 +118,24 @@ export class FleetStore {
     }
   }
 
+  static importFleetData(data: {
+    drivers?: Profile[];
+    vehicles?: Vehicle[];
+    companies?: Company[];
+    duty_sessions?: DutySession[];
+    trips?: Trip[];
+    fuel_logs?: FuelLog[];
+  }): void {
+    if (typeof window === 'undefined') return;
+    if (data.drivers && Array.isArray(data.drivers)) setItem(STORAGE_KEYS.DRIVERS, data.drivers);
+    if (data.vehicles && Array.isArray(data.vehicles)) setItem(STORAGE_KEYS.VEHICLES, data.vehicles);
+    if (data.companies && Array.isArray(data.companies)) setItem(STORAGE_KEYS.COMPANIES, data.companies);
+    if (data.duty_sessions && Array.isArray(data.duty_sessions)) setItem(STORAGE_KEYS.DUTY_SESSIONS, data.duty_sessions);
+    if (data.trips && Array.isArray(data.trips)) setItem(STORAGE_KEYS.TRIPS, data.trips);
+    if (data.fuel_logs && Array.isArray(data.fuel_logs)) setItem(STORAGE_KEYS.FUEL_LOGS, data.fuel_logs);
+    setItem(STORAGE_KEYS.INITIALIZED, 'true');
+  }
+
   static async syncWithSupabase(): Promise<void> {
     if (typeof window === 'undefined' || !isLiveSupabaseConfigured()) return;
     try {
