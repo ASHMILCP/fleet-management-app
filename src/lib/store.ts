@@ -31,14 +31,17 @@ const STORAGE_KEYS = {
   TRIPS: 'fleet_trips_v1',
   FUEL_LOGS: 'fleet_fuel_logs_v1',
   CURRENT_USER: 'fleet_current_user_v1',
+  INITIALIZED: 'fleet_initialized_v1',
 };
 
 // Safe LocalStorage helpers
 function getItem<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
+    const isInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
     const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : fallback;
+    if (data !== null) return JSON.parse(data);
+    return isInitialized === 'true' ? ([] as unknown as T) : fallback;
   } catch {
     return fallback;
   }
@@ -83,6 +86,22 @@ export class FleetStore {
         document.cookie = `${name}=; path=/driver; expires=${pastDate}; max-age=0`;
         document.cookie = `${name}=; path=/admin; expires=${pastDate}; max-age=0`;
       });
+    }
+  }
+
+  static clearAllDemoData(): void {
+    if (typeof window === 'undefined') return;
+    setItem(STORAGE_KEYS.INITIALIZED, 'true');
+    setItem(STORAGE_KEYS.DRIVERS, []);
+    setItem(STORAGE_KEYS.VEHICLES, []);
+    setItem(STORAGE_KEYS.COMPANIES, []);
+    setItem(STORAGE_KEYS.DUTY_SESSIONS, []);
+    setItem(STORAGE_KEYS.TRIPS, []);
+    setItem(STORAGE_KEYS.FUEL_LOGS, []);
+
+    const current = this.getCurrentUser();
+    if (current && current.role === 'DRIVER') {
+      this.logout();
     }
   }
 

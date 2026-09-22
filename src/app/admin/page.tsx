@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   Calendar,
   AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -40,7 +41,7 @@ export default function AdminDashboard() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
-  useEffect(() => {
+  const loadDashboardData = () => {
     const data = FleetStore.getAdminMetrics();
     setMetrics(data);
 
@@ -49,7 +50,23 @@ export default function AdminDashboard() {
 
     setDrivers(FleetStore.getDrivers());
     setVehicles(FleetStore.getVehicles());
+  };
+
+  useEffect(() => {
+    loadDashboardData();
   }, []);
+
+  const handleClearDemoData = () => {
+    if (
+      confirm(
+        '⚠️ Are you sure you want to CLEAR ALL DEMO DATA?\n\nThis will remove all demo drivers, vehicles, companies, duty sessions, trips, and fuel logs so you can start 100% fresh.\n\nYour admin login will remain intact.'
+      )
+    ) {
+      FleetStore.clearAllDemoData();
+      loadDashboardData();
+      alert('All demo data cleared! Your fleet system is now empty and ready for fresh entries.');
+    }
+  };
 
   const driverMap = new Map(drivers.map((d) => [d.id, d]));
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
@@ -76,7 +93,17 @@ export default function AdminDashboard() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={handleClearDemoData}
+            leftIcon={<RotateCcw className="w-4 h-4 text-rose-600" />}
+            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          >
+            Clear Demo Data
+          </Button>
+
           <Link href="/admin/reports">
             <Button variant="primary" size="md" leftIcon={<FileSpreadsheet className="w-4 h-4" />}>
               Generate Reports

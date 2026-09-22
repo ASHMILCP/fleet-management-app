@@ -17,6 +17,9 @@ import {
   Trash2,
   Search,
   KeyRound,
+  Eye,
+  EyeOff,
+  RotateCcw,
 } from 'lucide-react';
 
 export default function AdminDriversPage() {
@@ -25,6 +28,7 @@ export default function AdminDriversPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Profile | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   const loadData = () => {
     setDrivers(FleetStore.getDrivers());
@@ -57,6 +61,25 @@ export default function AdminDriversPage() {
     }
   };
 
+  const handleClearDemoData = () => {
+    if (
+      confirm(
+        '⚠️ Are you sure you want to CLEAR ALL DEMO DATA?\n\nThis will remove all demo drivers, vehicles, companies, duty sessions, trips, and fuel logs so you can start 100% fresh.\n\nYour admin login will remain intact.'
+      )
+    ) {
+      FleetStore.clearAllDemoData();
+      loadData();
+      alert('All demo data has been cleared! Your fleet system is now empty and ready for fresh entries.');
+    }
+  };
+
+  const togglePasswordVisibility = (driverId: string) => {
+    setVisiblePasswords((prev) => ({
+      ...prev,
+      [driverId]: !prev[driverId],
+    }));
+  };
+
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
 
   const filteredDrivers = drivers.filter((d) => {
@@ -79,17 +102,28 @@ export default function AdminDriversPage() {
             <span>Driver Management &amp; Credentials</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Create driver logins, reset passwords, assign fleet vehicles, and manage driver accounts
+            Create driver logins, inspect/reset passwords, assign fleet vehicles, and manage driver accounts
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          onClick={handleOpenAdd}
-          leftIcon={<UserPlus className="w-4 h-4" />}
-        >
-          Add New Driver
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            onClick={handleClearDemoData}
+            leftIcon={<RotateCcw className="w-4 h-4 text-rose-600" />}
+            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          >
+            Clear Demo Data
+          </Button>
+
+          <Button
+            variant="primary"
+            onClick={handleOpenAdd}
+            leftIcon={<UserPlus className="w-4 h-4" />}
+          >
+            Add New Driver
+          </Button>
+        </div>
       </div>
 
       {/* FILTER & STATS BAR */}
@@ -116,7 +150,7 @@ export default function AdminDriversPage() {
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
               <tr>
                 <th className="py-3.5 px-4">Driver Name</th>
-                <th className="py-3.5 px-4">Username</th>
+                <th className="py-3.5 px-4">Username &amp; Password</th>
                 <th className="py-3.5 px-4">Phone</th>
                 <th className="py-3.5 px-4">License No</th>
                 <th className="py-3.5 px-4">Assigned Vehicle</th>
@@ -146,10 +180,36 @@ export default function AdminDriversPage() {
 
                     <td className="py-4 px-4 text-slate-700 font-mono text-xs font-semibold">
                       {driver.username ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200/60">
-                          <KeyRound className="w-3 h-3 text-blue-500" />
-                          {driver.username}
-                        </span>
+                        <div className="space-y-1">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200/60">
+                            <KeyRound className="w-3 h-3 text-blue-500" />
+                            <span>@{driver.username}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-600 pl-0.5">
+                            <span className="text-slate-400 font-normal">Pass:</span>
+                            <span className="font-mono font-bold text-slate-800">
+                              {visiblePasswords[driver.id]
+                                ? driver.password || '(None)'
+                                : driver.password
+                                ? '••••••••'
+                                : '(None)'}
+                            </span>
+                            {driver.password && (
+                              <button
+                                type="button"
+                                onClick={() => togglePasswordVisibility(driver.id)}
+                                className="text-slate-400 hover:text-slate-700 p-0.5 rounded transition-colors"
+                                title={visiblePasswords[driver.id] ? 'Hide Password' : 'Show Password'}
+                              >
+                                {visiblePasswords[driver.id] ? (
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Eye className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         <span className="text-slate-400 italic">No username set</span>
                       )}
@@ -223,6 +283,21 @@ export default function AdminDriversPage() {
               })}
             </tbody>
           </table>
+
+          {filteredDrivers.length === 0 && (
+            <div className="p-8 text-center space-y-3">
+              <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                <Users className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No Drivers Found</p>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Your driver directory is empty. Click &quot;Add New Driver&quot; above to create driver accounts with custom usernames &amp; passwords.
+              </p>
+              <Button variant="primary" size="sm" onClick={handleOpenAdd} leftIcon={<UserPlus className="w-3.5 h-3.5" />}>
+                Add First Driver
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
 

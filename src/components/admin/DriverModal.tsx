@@ -37,7 +37,7 @@ export const DriverModal: React.FC<DriverModalProps> = ({
       if (driver) {
         setFullName(driver.full_name);
         setUsername(driver.username || '');
-        setPassword(''); // Empty means keep existing password
+        setPassword(driver.password || '');
         setPhone(driver.phone || '');
         setLicenseNumber(driver.license_number || '');
         setAssignedVehicleId(driver.assigned_vehicle_id || '');
