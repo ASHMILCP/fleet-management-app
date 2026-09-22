@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     role user_role NOT NULL DEFAULT 'DRIVER',
     full_name VARCHAR(150) NOT NULL,
+    username VARCHAR(100) UNIQUE,
+    password VARCHAR(255),
     phone VARCHAR(20),
     license_number VARCHAR(50),
     assigned_vehicle_id UUID REFERENCES public.vehicles(id) ON DELETE SET NULL,

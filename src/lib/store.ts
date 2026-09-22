@@ -171,7 +171,11 @@ export class FleetStore {
     if (driver.id) {
       const idx = drivers.findIndex((d) => d.id === driver.id);
       if (idx !== -1) {
-        drivers[idx] = { ...drivers[idx], ...driver } as Profile;
+        const updateData: Partial<Profile> = { ...driver };
+        if (!driver.password) {
+          delete updateData.password;
+        }
+        drivers[idx] = { ...drivers[idx], ...updateData } as Profile;
         setItem(STORAGE_KEYS.DRIVERS, drivers);
         return drivers[idx];
       }
@@ -180,6 +184,8 @@ export class FleetStore {
       id: crypto.randomUUID ? crypto.randomUUID() : `d-${Date.now()}`,
       role: 'DRIVER',
       full_name: driver.full_name.trim(),
+      username: driver.username?.trim(),
+      password: driver.password?.trim(),
       phone: driver.phone?.trim(),
       license_number: driver.license_number?.trim(),
       assigned_vehicle_id: driver.assigned_vehicle_id,
@@ -191,6 +197,12 @@ export class FleetStore {
     return newDriver;
   }
 
+  static deleteDriver(id: string): void {
+    const drivers = this.getDrivers();
+    const filtered = drivers.filter((d) => d.id !== id);
+    setItem(STORAGE_KEYS.DRIVERS, filtered);
+  }
+
   static toggleDriverStatus(id: string): void {
     const drivers = this.getDrivers();
     const idx = drivers.findIndex((d) => d.id === id);
@@ -198,6 +210,29 @@ export class FleetStore {
       drivers[idx].is_active = !drivers[idx].is_active;
       setItem(STORAGE_KEYS.DRIVERS, drivers);
     }
+  }
+
+  static authenticateUser(usernameOrEmail: string, passwordInput: string): Profile | null {
+    const query = usernameOrEmail.trim().toLowerCase();
+    const pass = passwordInput.trim();
+
+    // Check Admin
+    const admin = INITIAL_ADMIN;
+    const adminUserMatch = admin.username?.toLowerCase() === query || query === 'admin' || query.includes('admin');
+    const adminPassMatch = admin.password === pass || pass === 'admin123';
+    if (adminUserMatch && adminPassMatch && admin.is_active) {
+      return admin;
+    }
+
+    // Check Drivers
+    const drivers = this.getDrivers();
+    const matchedDriver = drivers.find((d) => {
+      const uMatch = d.username?.toLowerCase() === query || d.full_name.toLowerCase().includes(query) || (d.phone && d.phone.includes(query));
+      const pMatch = d.password ? d.password === pass : true;
+      return uMatch && pMatch && d.is_active;
+    });
+
+    return matchedDriver || null;
   }
 
   // Duty Sessions

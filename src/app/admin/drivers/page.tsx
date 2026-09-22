@@ -12,11 +12,11 @@ import {
   UserPlus,
   Car,
   Phone,
-  CreditCard,
   Edit2,
   Power,
-  ShieldCheck,
+  Trash2,
   Search,
+  KeyRound,
 } from 'lucide-react';
 
 export default function AdminDriversPage() {
@@ -50,12 +50,20 @@ export default function AdminDriversPage() {
     loadData();
   };
 
+  const handleDeleteDriver = (driver: Profile) => {
+    if (confirm(`Are you sure you want to delete driver "${driver.full_name}"? This action cannot be undone.`)) {
+      FleetStore.deleteDriver(driver.id);
+      loadData();
+    }
+  };
+
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
 
   const filteredDrivers = drivers.filter((d) => {
     const query = searchQuery.toLowerCase();
     return (
       d.full_name.toLowerCase().includes(query) ||
+      (d.username && d.username.toLowerCase().includes(query)) ||
       (d.phone && d.phone.toLowerCase().includes(query)) ||
       (d.license_number && d.license_number.toLowerCase().includes(query))
     );
@@ -68,10 +76,10 @@ export default function AdminDriversPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
             <Users className="w-6 h-6 text-blue-600" />
-            <span>Driver Management</span>
+            <span>Driver Management &amp; Credentials</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Register, assign fleet vehicles, edit licenses, and toggle active status
+            Create driver logins, reset passwords, assign fleet vehicles, and manage driver accounts
           </p>
         </div>
 
@@ -92,7 +100,7 @@ export default function AdminDriversPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search driver by name, phone, license..."
+            placeholder="Search by name, username, phone..."
             className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -108,6 +116,7 @@ export default function AdminDriversPage() {
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
               <tr>
                 <th className="py-3.5 px-4">Driver Name</th>
+                <th className="py-3.5 px-4">Username</th>
                 <th className="py-3.5 px-4">Phone</th>
                 <th className="py-3.5 px-4">License No</th>
                 <th className="py-3.5 px-4">Assigned Vehicle</th>
@@ -133,6 +142,17 @@ export default function AdminDriversPage() {
                           <div className="text-xs text-slate-400 font-normal">Role: {driver.role}</div>
                         </div>
                       </div>
+                    </td>
+
+                    <td className="py-4 px-4 text-slate-700 font-mono text-xs font-semibold">
+                      {driver.username ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200/60">
+                          <KeyRound className="w-3 h-3 text-blue-500" />
+                          {driver.username}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic">No username set</span>
+                      )}
                     </td>
 
                     <td className="py-4 px-4 text-slate-600 font-mono text-xs">
@@ -168,10 +188,10 @@ export default function AdminDriversPage() {
                     </td>
 
                     <td className="py-4 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => handleOpenEdit(driver)}
-                          title="Edit Driver"
+                          title="Edit Driver Credentials"
                           className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         >
                           <Edit2 className="w-4 h-4" />
@@ -182,11 +202,19 @@ export default function AdminDriversPage() {
                           title={driver.is_active ? 'Deactivate Driver' : 'Activate Driver'}
                           className={`p-1.5 rounded-lg transition-colors ${
                             driver.is_active
-                              ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                              ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                               : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                           }`}
                         >
                           <Power className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteDriver(driver)}
+                          title="Delete Driver Account"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </td>

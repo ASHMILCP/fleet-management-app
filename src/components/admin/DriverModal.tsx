@@ -5,6 +5,7 @@ import { Profile, Vehicle } from '@/types';
 import { FleetStore } from '@/lib/store';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { Eye, EyeOff, KeyRound } from 'lucide-react';
 
 interface DriverModalProps {
   isOpen: boolean;
@@ -20,6 +21,9 @@ export const DriverModal: React.FC<DriverModalProps> = ({
   onSave,
 }) => {
   const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [assignedVehicleId, setAssignedVehicleId] = useState('');
@@ -29,14 +33,19 @@ export const DriverModal: React.FC<DriverModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setVehicles(FleetStore.getActiveVehicles());
+      setShowPassword(false);
       if (driver) {
         setFullName(driver.full_name);
+        setUsername(driver.username || '');
+        setPassword(''); // Empty means keep existing password
         setPhone(driver.phone || '');
         setLicenseNumber(driver.license_number || '');
         setAssignedVehicleId(driver.assigned_vehicle_id || '');
         setIsActive(driver.is_active);
       } else {
         setFullName('');
+        setUsername('');
+        setPassword('');
         setPhone('');
         setLicenseNumber('');
         setAssignedVehicleId('');
@@ -48,13 +57,20 @@ export const DriverModal: React.FC<DriverModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
-      alert('Please enter the driver name');
+      alert('Please enter the driver full name');
+      return;
+    }
+
+    if (!driver && (!username.trim() || !password.trim())) {
+      alert('Please specify a Username and Password for the new driver');
       return;
     }
 
     FleetStore.saveDriver({
       id: driver?.id,
       full_name: fullName.trim(),
+      username: username.trim() || undefined,
+      password: password.trim() || undefined,
       phone: phone.trim() || undefined,
       license_number: licenseNumber.trim() || undefined,
       assigned_vehicle_id: assignedVehicleId || undefined,
@@ -69,8 +85,8 @@ export const DriverModal: React.FC<DriverModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={driver ? 'Edit Driver Details' : 'Add New Driver'}
-      subtitle="Manage driver credentials and vehicle assignment"
+      title={driver ? 'Edit Driver & Account Credentials' : 'Add New Driver & Login Account'}
+      subtitle="Manage driver details, vehicle assignment, and login credentials"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -85,6 +101,53 @@ export const DriverModal: React.FC<DriverModalProps> = ({
             className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             required
           />
+        </div>
+
+        {/* LOGIN CREDENTIALS SECTION */}
+        <div className="p-3.5 bg-slate-100/80 rounded-2xl border border-slate-200/80 space-y-3">
+          <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+            Login Credentials
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1 uppercase tracking-wider">
+                Username {!driver && '*'}
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase().trim())}
+                placeholder="e.g. ramesh123"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                required={!driver}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1 uppercase tracking-wider">
+                {driver ? 'New Password (Optional)' : 'Password *'}
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={driver ? 'Leave blank to keep' : '••••••••'}
+                  className="w-full pl-3 pr-9 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  required={!driver}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

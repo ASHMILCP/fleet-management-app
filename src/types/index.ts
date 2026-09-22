@@ -7,6 +7,8 @@ export interface Profile {
   id: string;
   role: UserRole;
   full_name: string;
+  username?: string;
+  password?: string;
   phone?: string;
   license_number?: string;
   assigned_vehicle_id?: string;
