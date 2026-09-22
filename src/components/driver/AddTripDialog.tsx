@@ -40,7 +40,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
     }
   }, [isOpen]);
 
-  const multiplier = tripType === 'TWO_SIDE' ? 2 : 1;
+  const multiplier = tripType === 'ONE_SIDE' ? 2 : 1;
   const parsedKm = parseFloat(oneSideKm) || 0;
   const calculatedTotalKm = parseFloat((parsedKm * multiplier).toFixed(2));
 
@@ -154,7 +154,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
                 }`}
               >
                 <span>ONE SIDE</span>
-                <span className="text-xs font-mono font-normal opacity-80">Multiplier: x1</span>
+                <span className="text-xs font-mono font-normal opacity-80">Multiplier: x2 (Double)</span>
               </button>
               <button
                 type="button"
@@ -165,8 +165,8 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <span>ROUND TRIP (2-SIDE)</span>
-                <span className="text-xs font-mono font-normal opacity-80">Multiplier: x2</span>
+                <span>TWO SIDE</span>
+                <span className="text-xs font-mono font-normal opacity-80">Multiplier: x1</span>
               </button>
             </div>
           </div>

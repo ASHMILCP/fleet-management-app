@@ -227,10 +227,10 @@ export default function DriverDashboard() {
 
                       <div className="text-right flex items-center gap-3">
                         <Badge
-                          variant={trip.trip_type === 'TWO_SIDE' ? 'purple' : 'info'}
+                          variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'}
                           size="sm"
                         >
-                          {trip.trip_type === 'TWO_SIDE' ? '2-SIDE (x2)' : '1-SIDE (x1)'}
+                          {trip.trip_type === 'ONE_SIDE' ? '1-SIDE (x2)' : '2-SIDE (x1)'}
                         </Badge>
                         <div>
                           <div className="text-base font-extrabold text-slate-900 font-mono">

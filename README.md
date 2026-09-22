@@ -21,7 +21,7 @@ A responsive, production-ready Fleet Management web application built with **Nex
 - **Add Trip Flow with Confirmation Modal**:
   - Select client company from active companies.
   - Enter One-Side KM.
-  - Select `ONE_SIDE` (multiplier 1) or `TWO_SIDE` (multiplier 2).
+  - Select `ONE_SIDE` (multiplier 2 - double) or `TWO_SIDE` (multiplier 1).
   - **Confirmation Modal** explicitly calculates and displays:  
     `One-Side KM × Multiplier = Total KM` before submitting!
 - **Add Fuel Flow**:

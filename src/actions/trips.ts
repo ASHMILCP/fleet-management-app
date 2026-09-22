@@ -16,7 +16,7 @@ export async function createTripAction(params: {
 }) {
   try {
     const supabase = await createClient();
-    const multiplier = params.tripType === 'TWO_SIDE' ? 2 : 1;
+    const multiplier = params.tripType === 'ONE_SIDE' ? 2 : 1;
     const totalKm = parseFloat((params.oneSideKm * multiplier).toFixed(2));
 
     const { data, error } = await supabase
