@@ -34,19 +34,11 @@ export const Navbar: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'ADMIN' || pathname.startsWith('/admin');
 
-  const handleSwitchRole = () => {
-    if (isAdmin) {
-      FleetStore.setCurrentUser(INITIAL_DRIVERS[0]);
-      router.push('/driver');
-    } else {
-      FleetStore.setCurrentUser(INITIAL_ADMIN);
-      router.push('/admin');
-    }
-  };
-
   const handleLogout = () => {
     FleetStore.logout();
+    setCurrentUser(null);
     router.push('/login');
+    router.refresh();
   };
 
   const adminNavItems = [
@@ -118,23 +110,13 @@ export const Navbar: React.FC = () => {
               {isAdmin ? 'ADMIN PORTAL' : 'DRIVER PORTAL'}
             </Badge>
 
-            {/* QUICK ROLE SWITCHER FOR DEMO / EVALUATION */}
-            <button
-              onClick={handleSwitchRole}
-              title="Quickly toggle between Admin and Driver view"
-              className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-blue-600 hover:bg-blue-50/80 rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5"
-            >
-              <Repeat className="w-3.5 h-3.5" />
-              <span>Switch to {isAdmin ? 'Driver' : 'Admin'}</span>
-            </button>
-
             {/* USER INFO */}
             <div className="text-right pl-2 border-l border-slate-200">
               <div className="text-xs font-bold text-slate-800 leading-tight">
                 {currentUser?.full_name || (isAdmin ? 'Admin' : 'Driver')}
               </div>
               <div className="text-[10px] text-slate-400">
-                {currentUser?.phone || 'Fleet Associate'}
+                {currentUser?.username ? `@${currentUser.username}` : (currentUser?.phone || 'Fleet Associate')}
               </div>
             </div>
 
@@ -142,20 +124,15 @@ export const Navbar: React.FC = () => {
             <button
               onClick={handleLogout}
               title="Sign Out"
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
             </button>
           </div>
 
           {/* MOBILE MENU TOGGLE */}
           <div className="flex sm:hidden items-center gap-2">
-            <button
-              onClick={handleSwitchRole}
-              className="p-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg"
-            >
-              {isAdmin ? 'Driver Mode' : 'Admin Mode'}
-            </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
@@ -194,14 +171,7 @@ export const Navbar: React.FC = () => {
             ))}
           </div>
 
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            <button
-              onClick={handleSwitchRole}
-              className="text-xs text-blue-600 font-semibold py-1.5 flex items-center gap-1"
-            >
-              <Repeat className="w-3.5 h-3.5" />
-              Switch to {isAdmin ? 'Driver' : 'Admin'}
-            </button>
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
             <button
               onClick={handleLogout}
               className="text-xs text-rose-600 font-semibold py-1.5 flex items-center gap-1"

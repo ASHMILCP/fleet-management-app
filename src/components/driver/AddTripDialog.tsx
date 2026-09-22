@@ -64,7 +64,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
     FleetStore.addTrip({
       driver_id: driverId,
       company_id: selectedCompanyId,
-      vehicle_id: activeDuty?.vehicle_id || driver.assigned_vehicle_id,
+      vehicle_id: activeDuty?.vehicle_id || driver?.assigned_vehicle_id,
       duty_session_id: activeDuty?.id || null,
       one_side_km: parsedKm,
       trip_type: tripType,

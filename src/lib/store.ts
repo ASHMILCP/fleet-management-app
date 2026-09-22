@@ -55,8 +55,15 @@ function setItem<T>(key: string, value: T): void {
 
 export class FleetStore {
   // Current User Session
-  static getCurrentUser(): Profile {
-    return getItem<Profile>(STORAGE_KEYS.CURRENT_USER, INITIAL_DRIVERS[0]);
+  static getCurrentUser(): Profile | null {
+    if (typeof window === 'undefined') return null;
+    const stored = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored) as Profile;
+    } catch {
+      return null;
+    }
   }
 
   static setCurrentUser(profile: Profile): void {
@@ -69,7 +76,7 @@ export class FleetStore {
   static logout(): void {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-      document.cookie = 'fleet_demo_role=; path=/; max-age=0';
+      document.cookie = 'fleet_demo_role=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     }
   }
 
@@ -114,6 +121,12 @@ export class FleetStore {
     }
   }
 
+  static deleteVehicle(id: string): void {
+    const vehicles = this.getVehicles();
+    const filtered = vehicles.filter((v) => v.id !== id);
+    setItem(STORAGE_KEYS.VEHICLES, filtered);
+  }
+
   // Companies
   static getCompanies(): Company[] {
     return getItem<Company[]>(STORAGE_KEYS.COMPANIES, INITIAL_COMPANIES);
@@ -155,6 +168,12 @@ export class FleetStore {
       companies[idx].is_active = !companies[idx].is_active;
       setItem(STORAGE_KEYS.COMPANIES, companies);
     }
+  }
+
+  static deleteCompany(id: string): void {
+    const companies = this.getCompanies();
+    const filtered = companies.filter((c) => c.id !== id);
+    setItem(STORAGE_KEYS.COMPANIES, filtered);
   }
 
   // Drivers

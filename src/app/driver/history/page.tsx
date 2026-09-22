@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
 import { Trip, Profile } from '@/types';
 import { formatDateIST, formatTimeIST } from '@/lib/timezone';
@@ -9,17 +10,20 @@ import { Badge } from '@/components/ui/Badge';
 import { Navigation, Building2, Calendar, FileText } from 'lucide-react';
 
 export default function DriverHistoryPage() {
+  const router = useRouter();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
 
   useEffect(() => {
     const user = FleetStore.getCurrentUser();
-    setCurrentUser(user);
-    if (user?.id) {
-      const all = FleetStore.getTrips();
-      setTrips(all.filter((t) => t.driver_id === user.id));
+    if (!user || !user.id) {
+      router.push('/login');
+      return;
     }
-  }, []);
+    setCurrentUser(user);
+    const all = FleetStore.getTrips();
+    setTrips(all.filter((t) => t.driver_id === user.id));
+  }, [router]);
 
   const companies = FleetStore.getCompanies();
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));

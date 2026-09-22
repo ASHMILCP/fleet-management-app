@@ -40,7 +40,7 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
 
     FleetStore.addFuelLog({
       driver_id: driverId,
-      vehicle_id: activeDuty?.vehicle_id || driver.assigned_vehicle_id,
+      vehicle_id: activeDuty?.vehicle_id || driver?.assigned_vehicle_id,
       duty_session_id: activeDuty?.id || null,
       fuel_type: fuelType,
       amount: parsedAmount,

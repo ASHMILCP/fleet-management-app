@@ -15,6 +15,7 @@ import {
   IndianRupee,
   Edit2,
   Power,
+  Trash2,
   Search,
 } from 'lucide-react';
 
@@ -45,6 +46,13 @@ export default function AdminCompaniesPage() {
   const handleToggleStatus = (id: string) => {
     FleetStore.toggleCompanyStatus(id);
     loadData();
+  };
+
+  const handleDeleteCompany = (company: Company) => {
+    if (confirm(`Are you sure you want to delete company "${company.name}"?`)) {
+      FleetStore.deleteCompany(company.id);
+      loadData();
+    }
   };
 
   const filteredCompanies = companies.filter((c) => {
@@ -162,11 +170,19 @@ export default function AdminCompaniesPage() {
                         title={company.is_active ? 'Deactivate Company' : 'Activate Company'}
                         className={`p-1.5 rounded-lg transition-colors ${
                           company.is_active
-                            ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                             : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                         }`}
                       >
                         <Power className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteCompany(company)}
+                        title="Delete Company"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>

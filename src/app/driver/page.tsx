@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
 import { Profile, Trip, FuelLog, DriverTodaySummary } from '@/types';
 import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 
 export default function DriverDashboard() {
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isTripDialogOpen, setIsTripDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
@@ -44,26 +46,28 @@ export default function DriverDashboard() {
 
   const refreshData = useCallback(() => {
     const user = FleetStore.getCurrentUser();
+    if (!user || !user.id) {
+      router.push('/login');
+      return;
+    }
     setCurrentUser(user);
 
-    if (user?.id) {
-      const summary = FleetStore.getDriverTodaySummary(user.id);
-      setTodaySummary(summary);
+    const summary = FleetStore.getDriverTodaySummary(user.id);
+    setTodaySummary(summary);
 
-      const today = getTodayDateIST();
-      const allTrips = FleetStore.getTrips();
-      const userTripsToday = allTrips.filter(
-        (t) => t.driver_id === user.id && t.trip_date === today
-      );
-      setTodayTrips(userTripsToday);
+    const today = getTodayDateIST();
+    const allTrips = FleetStore.getTrips();
+    const userTripsToday = allTrips.filter(
+      (t) => t.driver_id === user.id && t.trip_date === today
+    );
+    setTodayTrips(userTripsToday);
 
-      const allFuel = FleetStore.getFuelLogs();
-      const userFuelToday = allFuel.filter(
-        (f) => f.driver_id === user.id && f.log_date === today
-      );
-      setTodayFuelLogs(userFuelToday);
-    }
-  }, []);
+    const allFuel = FleetStore.getFuelLogs();
+    const userFuelToday = allFuel.filter(
+      (f) => f.driver_id === user.id && f.log_date === today
+    );
+    setTodayFuelLogs(userFuelToday);
+  }, [router]);
 
   useEffect(() => {
     refreshData();

@@ -13,6 +13,7 @@ import {
   Fuel,
   Edit2,
   Power,
+  Trash2,
   Search,
   CheckCircle2,
 } from 'lucide-react';
@@ -44,6 +45,13 @@ export default function AdminVehiclesPage() {
   const handleToggleStatus = (id: string) => {
     FleetStore.toggleVehicleStatus(id);
     loadData();
+  };
+
+  const handleDeleteVehicle = (vehicle: Vehicle) => {
+    if (confirm(`Are you sure you want to delete vehicle "${vehicle.registration_number}"?`)) {
+      FleetStore.deleteVehicle(vehicle.id);
+      loadData();
+    }
   };
 
   const filteredVehicles = vehicles.filter((v) => {
@@ -153,11 +161,19 @@ export default function AdminVehiclesPage() {
                         title={vehicle.is_active ? 'Deactivate Vehicle' : 'Activate Vehicle'}
                         className={`p-1.5 rounded-lg transition-colors ${
                           vehicle.is_active
-                            ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                             : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                         }`}
                       >
                         <Power className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteVehicle(vehicle)}
+                        title="Delete Vehicle"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>
