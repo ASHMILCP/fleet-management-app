@@ -41,7 +41,8 @@ export default function AdminDashboard() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
-  const loadDashboardData = () => {
+  const loadDashboardData = async () => {
+    await FleetStore.syncWithSupabase();
     const data = FleetStore.getAdminMetrics();
     setMetrics(data);
 

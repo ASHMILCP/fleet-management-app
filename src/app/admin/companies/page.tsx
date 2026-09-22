@@ -25,7 +25,8 @@ export default function AdminCompaniesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
-  const loadData = () => {
+  const loadData = async () => {
+    await FleetStore.syncWithSupabase();
     setCompanies(FleetStore.getCompanies());
   };
 

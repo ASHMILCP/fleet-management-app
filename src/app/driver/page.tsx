@@ -44,7 +44,8 @@ export default function DriverDashboard() {
   const [todayFuelLogs, setTodayFuelLogs] = useState<FuelLog[]>([]);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
-  const refreshData = useCallback(() => {
+  const refreshData = useCallback(async () => {
+    await FleetStore.syncWithSupabase();
     const user = FleetStore.getCurrentUser();
     if (!user || !user.id) {
       router.push('/login');

@@ -24,7 +24,8 @@ export default function AdminVehiclesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
-  const loadData = () => {
+  const loadData = async () => {
+    await FleetStore.syncWithSupabase();
     setVehicles(FleetStore.getVehicles());
   };
 

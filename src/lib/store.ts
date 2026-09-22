@@ -22,6 +22,7 @@ import {
   INITIAL_ADMIN,
 } from './mockData';
 import { getTodayDateIST, calculateWorkingHours, formatTimeIST } from './timezone';
+import { createClient, isLiveSupabaseConfigured } from './supabase/client';
 
 const STORAGE_KEYS = {
   DRIVERS: 'fleet_drivers_v1',
@@ -102,6 +103,44 @@ export class FleetStore {
     const current = this.getCurrentUser();
     if (current && current.role === 'DRIVER') {
       this.logout();
+    }
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      Promise.all([
+        supabase.from('trips').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('fuel_expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('duty_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('profiles').delete().neq('role', 'ADMIN'),
+        supabase.from('vehicles').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('companies').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+      ]).catch((err) => console.error('Error clearing Supabase demo tables:', err));
+    }
+  }
+
+  static async syncWithSupabase(): Promise<void> {
+    if (typeof window === 'undefined' || !isLiveSupabaseConfigured()) return;
+    try {
+      const supabase = createClient();
+      const [vRes, cRes, pRes, dRes, tRes, fRes] = await Promise.all([
+        supabase.from('vehicles').select('*'),
+        supabase.from('companies').select('*'),
+        supabase.from('profiles').select('*'),
+        supabase.from('duty_sessions').select('*'),
+        supabase.from('trips').select('*'),
+        supabase.from('fuel_expenses').select('*'),
+      ]);
+
+      if (vRes.data && vRes.data.length > 0) setItem(STORAGE_KEYS.VEHICLES, vRes.data);
+      if (cRes.data && cRes.data.length > 0) setItem(STORAGE_KEYS.COMPANIES, cRes.data);
+      if (pRes.data && pRes.data.length > 0) setItem(STORAGE_KEYS.DRIVERS, pRes.data);
+      if (dRes.data && dRes.data.length > 0) setItem(STORAGE_KEYS.DUTY_SESSIONS, dRes.data);
+      if (tRes.data && tRes.data.length > 0) setItem(STORAGE_KEYS.TRIPS, tRes.data);
+      if (fRes.data && fRes.data.length > 0) setItem(STORAGE_KEYS.FUEL_LOGS, fRes.data);
+
+      setItem(STORAGE_KEYS.INITIALIZED, 'true');
+    } catch (err) {
+      console.error('Error syncing with Supabase:', err);
     }
   }
 
