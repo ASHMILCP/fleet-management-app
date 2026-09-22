@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
-import { Profile, Trip, FuelLog, DriverTodaySummary } from '@/types';
+import { Profile, Trip, FuelLog, DriverTodaySummary, Company } from '@/types';
 import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
 import { AddTripDialog } from '@/components/driver/AddTripDialog';
@@ -29,6 +29,7 @@ export default function DriverDashboard() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isTripDialogOpen, setIsTripDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [todaySummary, setTodaySummary] = useState<DriverTodaySummary>({
     dutySession: null,
     startTime: null,
@@ -52,6 +53,7 @@ export default function DriverDashboard() {
       return;
     }
     setCurrentUser(user);
+    setCompanies(FleetStore.getCompanies());
 
     const summary = FleetStore.getDriverTodaySummary(user.id);
     setTodaySummary(summary);
@@ -78,7 +80,6 @@ export default function DriverDashboard() {
     setRefreshIndex((prev) => prev + 1);
   };
 
-  const companies = FleetStore.getCompanies();
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
 
   return (

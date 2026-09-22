@@ -23,7 +23,8 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
   const [isEndModalOpen, setIsEndModalOpen] = useState<boolean>(false);
   const [elapsedTime, setElapsedTime] = useState<string>('00:00:00');
 
-  const loadDutyState = () => {
+  const loadDutyState = async () => {
+    await FleetStore.syncWithSupabase();
     const active = FleetStore.getActiveDutySession(driverId);
     setActiveSession(active);
     const activeVehicles = FleetStore.getActiveVehicles();

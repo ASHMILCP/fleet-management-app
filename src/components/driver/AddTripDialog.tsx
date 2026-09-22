@@ -32,13 +32,15 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      const active = FleetStore.getActiveCompanies();
-      setCompanies(active);
-      if (active.length > 0 && !selectedCompanyId) {
-        setSelectedCompanyId(active[0].id);
-      }
+      FleetStore.syncWithSupabase().then(() => {
+        const active = FleetStore.getActiveCompanies();
+        setCompanies(active);
+        if (active.length > 0 && !selectedCompanyId) {
+          setSelectedCompanyId(active[0].id);
+        }
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, selectedCompanyId]);
 
   const multiplier = tripType === 'ONE_SIDE' ? 2 : 1;
   const parsedKm = parseFloat(oneSideKm) || 0;
