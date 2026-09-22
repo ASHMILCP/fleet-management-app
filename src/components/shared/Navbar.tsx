@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import { FleetStore } from '@/lib/store';
 import { Profile } from '@/types';
 import { INITIAL_ADMIN, INITIAL_DRIVERS } from '@/lib/mockData';
@@ -34,11 +35,18 @@ export const Navbar: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'ADMIN' || pathname.startsWith('/admin');
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     FleetStore.logout();
     setCurrentUser(null);
-    router.push('/login');
-    router.refresh();
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {
+      // Ignore fallback
+    }
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
   };
 
   const adminNavItems = [

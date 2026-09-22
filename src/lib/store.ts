@@ -76,7 +76,13 @@ export class FleetStore {
   static logout(): void {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-      document.cookie = 'fleet_demo_role=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      const pastDate = 'Thu, 01 Jan 1970 00:00:00 GMT';
+      const cookieNames = ['fleet_demo_role', 'sb-access-token', 'sb-refresh-token'];
+      cookieNames.forEach((name) => {
+        document.cookie = `${name}=; path=/; expires=${pastDate}; max-age=0`;
+        document.cookie = `${name}=; path=/driver; expires=${pastDate}; max-age=0`;
+        document.cookie = `${name}=; path=/admin; expires=${pastDate}; max-age=0`;
+      });
     }
   }
 

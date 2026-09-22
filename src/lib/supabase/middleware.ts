@@ -10,7 +10,7 @@ export async function updateSession(request: NextRequest) {
 
   // Check for local demo session cookie first (for interactive preview mode)
   const demoRole = request.cookies.get('fleet_demo_role')?.value;
-  if (demoRole) {
+  if (demoRole && demoRole.trim() !== '') {
     if (pathname.startsWith('/admin') && demoRole !== 'ADMIN') {
       const url = request.nextUrl.clone();
       url.pathname = '/driver';
@@ -21,6 +21,12 @@ export async function updateSession(request: NextRequest) {
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
+    if (pathname === '/login') {
+      // Already logged in
+      const url = request.nextUrl.clone();
+      url.pathname = demoRole === 'ADMIN' ? '/admin' : '/driver';
+      return NextResponse.redirect(url);
+    }
     return supabaseResponse;
   }
 
@@ -28,8 +34,8 @@ export async function updateSession(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-  // If Supabase credentials are placeholder and no demo session, allow /login or redirect unauth to login
-  if (!supabaseUrl || supabaseUrl.includes('sample-fleet-app') || supabaseUrl.includes('your-project-id')) {
+  // If no demo role and credentials are placeholder/sample, redirect protected routes to /login
+  if (!demoRole || !supabaseUrl || supabaseUrl.includes('sample-fleet-app') || supabaseUrl.includes('your-project-id')) {
     if (pathname.startsWith('/admin') || pathname.startsWith('/driver')) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
