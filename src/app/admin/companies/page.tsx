@@ -26,6 +26,7 @@ export default function AdminCompaniesPage() {
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
   const loadData = async () => {
+    setCompanies(FleetStore.getCompanies());
     await FleetStore.syncWithSupabase();
     setCompanies(FleetStore.getCompanies());
   };

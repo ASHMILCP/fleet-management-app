@@ -25,6 +25,7 @@ export default function AdminVehiclesPage() {
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
   const loadData = async () => {
+    setVehicles(FleetStore.getVehicles());
     await FleetStore.syncWithSupabase();
     setVehicles(FleetStore.getVehicles());
   };

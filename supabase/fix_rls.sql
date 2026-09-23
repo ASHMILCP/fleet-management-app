@@ -31,3 +31,13 @@ CREATE POLICY "Allow public full access trips" ON public.trips FOR ALL USING (tr
 ALTER TABLE public.fuel_expenses ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public full access fuel_expenses" ON public.fuel_expenses;
 CREATE POLICY "Allow public full access fuel_expenses" ON public.fuel_expenses FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable full public access to drivers table (if exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'drivers') THEN
+        EXECUTE 'ALTER TABLE public.drivers ENABLE ROW LEVEL SECURITY';
+        EXECUTE 'DROP POLICY IF EXISTS "Allow public full access drivers" ON public.drivers';
+        EXECUTE 'CREATE POLICY "Allow public full access drivers" ON public.drivers FOR ALL USING (true) WITH CHECK (true)';
+    END IF;
+END $$;

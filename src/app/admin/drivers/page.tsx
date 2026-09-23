@@ -31,6 +31,8 @@ export default function AdminDriversPage() {
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   const loadData = async () => {
+    setDrivers(FleetStore.getDrivers());
+    setVehicles(FleetStore.getVehicles());
     await FleetStore.syncWithSupabase();
     setDrivers(FleetStore.getDrivers());
     setVehicles(FleetStore.getVehicles());

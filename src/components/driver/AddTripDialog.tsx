@@ -32,6 +32,11 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      const initialActive = FleetStore.getActiveCompanies();
+      setCompanies(initialActive);
+      if (initialActive.length > 0 && !selectedCompanyId) {
+        setSelectedCompanyId(initialActive[0].id);
+      }
       FleetStore.syncWithSupabase().then(() => {
         const active = FleetStore.getActiveCompanies();
         setCompanies(active);

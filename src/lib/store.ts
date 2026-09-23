@@ -63,6 +63,17 @@ function setItem<T>(key: string, value: T): void {
   }
 }
 
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export class FleetStore {
   // Current User Session
   static getCurrentUser(): Profile | null {
@@ -155,12 +166,165 @@ export class FleetStore {
         supabase.from('fuel_expenses').select('*'),
       ]);
 
-      if (Array.isArray(vRes.data)) setItem(STORAGE_KEYS.VEHICLES, vRes.data);
-      if (Array.isArray(cRes.data)) setItem(STORAGE_KEYS.COMPANIES, cRes.data);
-      if (Array.isArray(pRes.data)) setItem(STORAGE_KEYS.DRIVERS, pRes.data);
-      if (Array.isArray(dRes.data)) setItem(STORAGE_KEYS.DUTY_SESSIONS, dRes.data);
-      if (Array.isArray(tRes.data)) setItem(STORAGE_KEYS.TRIPS, tRes.data);
-      if (Array.isArray(fRes.data)) setItem(STORAGE_KEYS.FUEL_LOGS, fRes.data);
+      // 1. VEHICLES SYNC & UPLOAD
+      const localVehicles = this.getVehicles();
+      if (Array.isArray(vRes.data)) {
+        const cloudVehicles: Vehicle[] = vRes.data.map((row: any) => ({
+          id: row.id,
+          registration_number: row.registration_number,
+          model: row.model,
+          fuel_type: row.fuel_type || 'CNG',
+          is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+          created_at: row.created_at || new Date().toISOString(),
+        }));
+
+        const cloudVehicleIds = new Set(cloudVehicles.map((v) => v.id));
+        const unsyncedVehicles = localVehicles.filter((v) => !cloudVehicleIds.has(v.id));
+        for (const uv of unsyncedVehicles) {
+          supabase.from('vehicles').upsert({
+            id: uv.id,
+            registration_number: uv.registration_number,
+            model: uv.model,
+            fuel_type: uv.fuel_type,
+            status: uv.is_active ? 'ACTIVE' : 'INACTIVE',
+          }).then(({ error }) => {
+            if (error) console.error('Error auto-uploading vehicle to Supabase:', error);
+          });
+        }
+
+        const mergedVehicles = [...cloudVehicles, ...unsyncedVehicles];
+        setItem(STORAGE_KEYS.VEHICLES, mergedVehicles);
+      }
+
+      // 2. COMPANIES SYNC & UPLOAD
+      const localCompanies = this.getCompanies();
+      if (Array.isArray(cRes.data)) {
+        const cloudCompanies: Company[] = cRes.data.map((row: any) => {
+          let rate = 0;
+          if (row.notes && !isNaN(parseFloat(row.notes))) {
+            rate = parseFloat(row.notes);
+          } else if (row.billing_rate_per_km !== undefined) {
+            rate = Number(row.billing_rate_per_km) || 0;
+          }
+          return {
+            id: row.id,
+            name: row.company_name || row.name || 'Unnamed Company',
+            contact_person: row.contact_person || '',
+            phone: row.phone || '',
+            email: row.email || '',
+            billing_rate_per_km: rate,
+            is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+            created_at: row.created_at || new Date().toISOString(),
+          };
+        });
+
+        const cloudCompanyIds = new Set(cloudCompanies.map((c) => c.id));
+        const unsyncedCompanies = localCompanies.filter((c) => !cloudCompanyIds.has(c.id));
+        for (const uc of unsyncedCompanies) {
+          supabase.from('companies').upsert({
+            id: uc.id,
+            company_name: uc.name,
+            contact_person: uc.contact_person || null,
+            phone: uc.phone || null,
+            email: uc.email || null,
+            status: uc.is_active ? 'ACTIVE' : 'INACTIVE',
+            notes: uc.billing_rate_per_km ? String(uc.billing_rate_per_km) : null,
+          }).then(({ error }) => {
+            if (error) console.error('Error auto-uploading company to Supabase:', error);
+          });
+        }
+
+        const mergedCompanies = [...cloudCompanies, ...unsyncedCompanies];
+        setItem(STORAGE_KEYS.COMPANIES, mergedCompanies);
+      }
+
+      // 3. PROFILES / DRIVERS SYNC & MERGE
+      const localDrivers = this.getDrivers();
+      if (Array.isArray(pRes.data)) {
+        const cloudProfiles: Profile[] = pRes.data.map((row: any) => {
+          const existingLocal = localDrivers.find((d) => d.id === row.id || (row.phone && d.phone === row.phone) || (row.name && d.full_name === row.name));
+          return {
+            id: row.id,
+            role: (row.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+            full_name: row.full_name || row.name || 'Unnamed Driver',
+            phone: row.phone || existingLocal?.phone || '',
+            username: existingLocal?.username || (row.name ? row.name.toLowerCase().replace(/\s+/g, '') : undefined),
+            password: existingLocal?.password,
+            license_number: row.license_number || existingLocal?.license_number,
+            assigned_vehicle_id: row.assigned_vehicle_id || existingLocal?.assigned_vehicle_id,
+            is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+            created_at: row.created_at || existingLocal?.created_at || new Date().toISOString(),
+          };
+        });
+
+        const cloudProfileIds = new Set(cloudProfiles.map((p) => p.id));
+        const unsyncedDrivers = localDrivers.filter((d) => !cloudProfileIds.has(d.id));
+        const mergedDrivers = [...cloudProfiles, ...unsyncedDrivers];
+        setItem(STORAGE_KEYS.DRIVERS, mergedDrivers);
+      }
+
+      // 4. DUTY SESSIONS SYNC & MERGE
+      const localSessions = this.getDutySessions();
+      if (Array.isArray(dRes.data)) {
+        const cloudSessions: DutySession[] = dRes.data.map((row: any) => ({
+          id: row.id,
+          driver_id: row.driver_id,
+          vehicle_id: row.vehicle_id,
+          start_time: row.start_time,
+          end_time: row.end_time || null,
+          status: row.status || (row.end_time ? 'COMPLETED' : 'ACTIVE'),
+          notes: row.notes,
+          created_at: row.created_at || row.start_time || new Date().toISOString(),
+        }));
+        const cloudSessionIds = new Set(cloudSessions.map((s) => s.id));
+        const unsyncedSessions = localSessions.filter((s) => !cloudSessionIds.has(s.id));
+        const mergedSessions = [...cloudSessions, ...unsyncedSessions];
+        setItem(STORAGE_KEYS.DUTY_SESSIONS, mergedSessions);
+      }
+
+      // 5. TRIPS SYNC & MERGE
+      const localTrips = this.getTrips();
+      if (Array.isArray(tRes.data)) {
+        const cloudTrips: Trip[] = tRes.data.map((row: any) => ({
+          id: row.id,
+          driver_id: row.driver_id,
+          company_id: row.company_id,
+          vehicle_id: row.vehicle_id,
+          duty_session_id: row.duty_session_id,
+          one_side_km: row.entered_km || row.one_side_km || (row.total_km ? (row.trip_type === 'ONE_SIDE' ? row.total_km / 2 : row.total_km) : 0),
+          trip_type: row.trip_type || 'ONE_SIDE',
+          multiplier: row.trip_type === 'TWO_SIDE' ? 1 : (row.multiplier || 2),
+          total_km: Number(row.total_km || 0),
+          trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          notes: row.notes,
+          created_at: row.created_at || new Date().toISOString(),
+        }));
+        const cloudTripIds = new Set(cloudTrips.map((t) => t.id));
+        const unsyncedTrips = localTrips.filter((t) => !cloudTripIds.has(t.id));
+        const mergedTrips = [...cloudTrips, ...unsyncedTrips];
+        setItem(STORAGE_KEYS.TRIPS, mergedTrips);
+      }
+
+      // 6. FUEL LOGS SYNC & MERGE
+      const localFuel = this.getFuelLogs();
+      if (Array.isArray(fRes.data)) {
+        const cloudFuel: FuelLog[] = fRes.data.map((row: any) => ({
+          id: row.id,
+          driver_id: row.driver_id,
+          vehicle_id: row.vehicle_id,
+          duty_session_id: row.duty_session_id,
+          fuel_type: row.fuel_type || 'CNG',
+          amount: Number(row.amount || 0),
+          liters_or_kg: row.liters_or_kg || row.quantity,
+          log_date: row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          notes: row.notes,
+          created_at: row.created_at || new Date().toISOString(),
+        }));
+        const cloudFuelIds = new Set(cloudFuel.map((f) => f.id));
+        const unsyncedFuel = localFuel.filter((f) => !cloudFuelIds.has(f.id));
+        const mergedFuel = [...cloudFuel, ...unsyncedFuel];
+        setItem(STORAGE_KEYS.FUEL_LOGS, mergedFuel);
+      }
 
       setItem(STORAGE_KEYS.INITIALIZED, 'true');
     } catch (err) {
@@ -179,25 +343,46 @@ export class FleetStore {
 
   static saveVehicle(vehicle: Partial<Vehicle> & { registration_number: string; model: string }): Vehicle {
     const vehicles = this.getVehicles();
+    let targetVehicle: Vehicle;
+
     if (vehicle.id) {
       const idx = vehicles.findIndex((v) => v.id === vehicle.id);
       if (idx !== -1) {
         vehicles[idx] = { ...vehicles[idx], ...vehicle } as Vehicle;
-        setItem(STORAGE_KEYS.VEHICLES, vehicles);
-        return vehicles[idx];
+        targetVehicle = vehicles[idx];
+      } else {
+        targetVehicle = vehicle as Vehicle;
+        vehicles.unshift(targetVehicle);
       }
+    } else {
+      targetVehicle = {
+        id: generateUUID(),
+        registration_number: vehicle.registration_number.toUpperCase().trim(),
+        model: vehicle.model.trim(),
+        fuel_type: vehicle.fuel_type || 'CNG',
+        is_active: vehicle.is_active !== undefined ? vehicle.is_active : true,
+        created_at: new Date().toISOString(),
+      };
+      vehicles.unshift(targetVehicle);
     }
-    const newVehicle: Vehicle = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `v-${Date.now()}`,
-      registration_number: vehicle.registration_number.toUpperCase().trim(),
-      model: vehicle.model.trim(),
-      fuel_type: vehicle.fuel_type || 'CNG',
-      is_active: vehicle.is_active !== undefined ? vehicle.is_active : true,
-      created_at: new Date().toISOString(),
-    };
-    vehicles.unshift(newVehicle);
+
     setItem(STORAGE_KEYS.VEHICLES, vehicles);
-    return newVehicle;
+
+    // Direct Supabase Cloud write
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.from('vehicles').upsert({
+        id: targetVehicle.id,
+        registration_number: targetVehicle.registration_number,
+        model: targetVehicle.model,
+        fuel_type: targetVehicle.fuel_type,
+        status: targetVehicle.is_active ? 'ACTIVE' : 'INACTIVE',
+      }).then(({ error }) => {
+        if (error) console.error('Supabase direct vehicle save error:', error);
+      });
+    }
+
+    return targetVehicle;
   }
 
   static toggleVehicleStatus(id: string): void {
@@ -206,6 +391,13 @@ export class FleetStore {
     if (idx !== -1) {
       vehicles[idx].is_active = !vehicles[idx].is_active;
       setItem(STORAGE_KEYS.VEHICLES, vehicles);
+
+      if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+        const supabase = createClient();
+        supabase.from('vehicles').update({ status: vehicles[idx].is_active ? 'ACTIVE' : 'INACTIVE' }).eq('id', id).then(({ error }) => {
+          if (error) console.error('Supabase toggle vehicle status error:', error);
+        });
+      }
     }
   }
 
@@ -213,6 +405,13 @@ export class FleetStore {
     const vehicles = this.getVehicles();
     const filtered = vehicles.filter((v) => v.id !== id);
     setItem(STORAGE_KEYS.VEHICLES, filtered);
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.from('vehicles').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase vehicle delete error:', error);
+      });
+    }
   }
 
   // Companies
@@ -226,27 +425,50 @@ export class FleetStore {
 
   static saveCompany(company: Partial<Company> & { name: string }): Company {
     const companies = this.getCompanies();
+    let targetCompany: Company;
+
     if (company.id) {
       const idx = companies.findIndex((c) => c.id === company.id);
       if (idx !== -1) {
         companies[idx] = { ...companies[idx], ...company } as Company;
-        setItem(STORAGE_KEYS.COMPANIES, companies);
-        return companies[idx];
+        targetCompany = companies[idx];
+      } else {
+        targetCompany = company as Company;
+        companies.unshift(targetCompany);
       }
+    } else {
+      targetCompany = {
+        id: generateUUID(),
+        name: company.name.trim(),
+        contact_person: company.contact_person?.trim(),
+        phone: company.phone?.trim(),
+        email: company.email?.trim(),
+        billing_rate_per_km: company.billing_rate_per_km || 0,
+        is_active: company.is_active !== undefined ? company.is_active : true,
+        created_at: new Date().toISOString(),
+      };
+      companies.unshift(targetCompany);
     }
-    const newCompany: Company = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `c-${Date.now()}`,
-      name: company.name.trim(),
-      contact_person: company.contact_person?.trim(),
-      phone: company.phone?.trim(),
-      email: company.email?.trim(),
-      billing_rate_per_km: company.billing_rate_per_km || 0,
-      is_active: company.is_active !== undefined ? company.is_active : true,
-      created_at: new Date().toISOString(),
-    };
-    companies.unshift(newCompany);
+
     setItem(STORAGE_KEYS.COMPANIES, companies);
-    return newCompany;
+
+    // Direct Supabase Cloud write
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.from('companies').upsert({
+        id: targetCompany.id,
+        company_name: targetCompany.name,
+        contact_person: targetCompany.contact_person || null,
+        phone: targetCompany.phone || null,
+        email: targetCompany.email || null,
+        status: targetCompany.is_active ? 'ACTIVE' : 'INACTIVE',
+        notes: targetCompany.billing_rate_per_km ? String(targetCompany.billing_rate_per_km) : null,
+      }).then(({ error }) => {
+        if (error) console.error('Supabase direct company save error:', error);
+      });
+    }
+
+    return targetCompany;
   }
 
   static toggleCompanyStatus(id: string): void {
@@ -255,6 +477,13 @@ export class FleetStore {
     if (idx !== -1) {
       companies[idx].is_active = !companies[idx].is_active;
       setItem(STORAGE_KEYS.COMPANIES, companies);
+
+      if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+        const supabase = createClient();
+        supabase.from('companies').update({ status: companies[idx].is_active ? 'ACTIVE' : 'INACTIVE' }).eq('id', id).then(({ error }) => {
+          if (error) console.error('Supabase toggle company status error:', error);
+        });
+      }
     }
   }
 
@@ -262,6 +491,13 @@ export class FleetStore {
     const companies = this.getCompanies();
     const filtered = companies.filter((c) => c.id !== id);
     setItem(STORAGE_KEYS.COMPANIES, filtered);
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.from('companies').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase company delete error:', error);
+      });
+    }
   }
 
   // Drivers
@@ -276,6 +512,8 @@ export class FleetStore {
   static saveDriver(driver: Partial<Profile> & { full_name: string }): Profile {
     const drivers = this.getDrivers();
     let resultDriver: Profile;
+    const isNew = !driver.id;
+
     if (driver.id) {
       const idx = drivers.findIndex((d) => d.id === driver.id);
       if (idx !== -1) {
@@ -290,7 +528,7 @@ export class FleetStore {
       }
     } else {
       resultDriver = {
-        id: crypto.randomUUID ? crypto.randomUUID() : `d-${Date.now()}`,
+        id: generateUUID(),
         role: 'DRIVER',
         full_name: driver.full_name.trim(),
         username: driver.username?.trim(),
@@ -307,9 +545,42 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('profiles').upsert(resultDriver).then(({ error }) => {
-        if (error) console.error('Supabase direct profile save error:', error);
-      });
+      
+      const persistProfile = (targetId: string) => {
+        supabase.from('profiles').upsert({
+          id: targetId,
+          name: resultDriver.full_name,
+          phone: resultDriver.phone || null,
+          role: 'DRIVER',
+          status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+        }).then(({ error }) => {
+          if (error) console.error('Supabase direct profile save error:', error);
+        });
+      };
+
+      if (isNew && resultDriver.username && resultDriver.password) {
+        const email = resultDriver.username.includes('@') 
+          ? resultDriver.username 
+          : `${resultDriver.username.replace(/[^a-zA-Z0-9]/g, '')}@fleetapp.com`;
+        
+        supabase.auth.signUp({
+          email,
+          password: resultDriver.password,
+        }).then(({ data, error }) => {
+          if (error) {
+            console.warn('Supabase auth signup notice:', error.message);
+            persistProfile(resultDriver.id);
+          } else if (data?.user?.id) {
+            const oldId = resultDriver.id;
+            resultDriver.id = data.user.id;
+            const updatedDrivers = this.getDrivers().map((d) => (d.id === oldId ? resultDriver : d));
+            setItem(STORAGE_KEYS.DRIVERS, updatedDrivers);
+            persistProfile(data.user.id);
+          }
+        });
+      } else {
+        persistProfile(resultDriver.id);
+      }
     }
 
     return resultDriver;
@@ -346,7 +617,7 @@ export class FleetStore {
 
       if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
         const supabase = createClient();
-        supabase.from('profiles').update({ is_active: drivers[idx].is_active }).eq('id', id).then(({ error }) => {
+        supabase.from('profiles').update({ status: drivers[idx].is_active ? 'ACTIVE' : 'INACTIVE' }).eq('id', id).then(({ error }) => {
           if (error) console.error('Supabase toggle driver status error:', error);
         });
       }
@@ -427,7 +698,7 @@ export class FleetStore {
     });
 
     const newSession: DutySession = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `duty-${Date.now()}`,
+      id: generateUUID(),
       driver_id: driverId,
       vehicle_id: vehicleId,
       start_time: new Date().toISOString(),
@@ -442,7 +713,13 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('duty_sessions').insert(newSession).then(({ error }) => {
+      supabase.from('duty_sessions').insert({
+        id: newSession.id,
+        driver_id: newSession.driver_id,
+        vehicle_id: newSession.vehicle_id || null,
+        start_time: newSession.start_time,
+        end_time: null,
+      }).then(({ error }) => {
         if (error) console.error('Supabase start duty insert error:', error);
       });
     }
@@ -478,7 +755,7 @@ export class FleetStore {
     const trips = this.getTrips();
     const newTrip: Trip = {
       ...trip,
-      id: crypto.randomUUID ? crypto.randomUUID() : `trip-${Date.now()}`,
+      id: generateUUID(),
       created_at: new Date().toISOString(),
     };
     trips.unshift(newTrip);
@@ -486,7 +763,17 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('trips').insert(newTrip).then(({ error }) => {
+      supabase.from('trips').insert({
+        id: newTrip.id,
+        driver_id: newTrip.driver_id,
+        company_id: newTrip.company_id,
+        vehicle_id: newTrip.vehicle_id || null,
+        entered_km: newTrip.one_side_km,
+        trip_type: newTrip.trip_type,
+        total_km: newTrip.total_km,
+        trip_date: newTrip.trip_date,
+        notes: newTrip.notes || null,
+      }).then(({ error }) => {
         if (error) console.error('Supabase direct trip insert error:', error);
       });
     }
@@ -503,7 +790,7 @@ export class FleetStore {
     const fuelLogs = this.getFuelLogs();
     const newFuel: FuelLog = {
       ...fuel,
-      id: crypto.randomUUID ? crypto.randomUUID() : `fuel-${Date.now()}`,
+      id: generateUUID(),
       created_at: new Date().toISOString(),
     };
     fuelLogs.unshift(newFuel);
@@ -511,7 +798,14 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('fuel_expenses').insert(newFuel).then(({ error }) => {
+      supabase.from('fuel_expenses').insert({
+        id: newFuel.id,
+        driver_id: newFuel.driver_id,
+        vehicle_id: newFuel.vehicle_id || null,
+        fuel_type: newFuel.fuel_type || 'CNG',
+        amount: newFuel.amount,
+        notes: newFuel.notes || null,
+      }).then(({ error }) => {
         if (error) console.error('Supabase direct fuel insert error:', error);
       });
     }
