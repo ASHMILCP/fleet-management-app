@@ -25,6 +25,7 @@ import {
   Calendar,
   AlertCircle,
   RotateCcw,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -40,21 +41,37 @@ export default function AdminDashboard() {
   const [activeSessions, setActiveSessions] = useState<DutySession[]>([]);
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadDashboardData = async () => {
-    await FleetStore.syncWithSupabase();
-    const data = FleetStore.getAdminMetrics();
-    setMetrics(data);
+    setIsRefreshing(true);
+    try {
+      await FleetStore.syncWithSupabase();
+      const data = FleetStore.getAdminMetrics();
+      setMetrics(data);
 
-    const allSessions = FleetStore.getDutySessions();
-    setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE'));
+      const allSessions = FleetStore.getDutySessions();
+      setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE'));
 
-    setDrivers(FleetStore.getDrivers());
-    setVehicles(FleetStore.getVehicles());
+      setDrivers(FleetStore.getDrivers());
+      setVehicles(FleetStore.getVehicles());
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
     loadDashboardData();
+
+    // Auto-refresh every 15s so driver entries from mobile reflect automatically
+    const interval = setInterval(loadDashboardData, 15000);
+    const handleFocus = () => loadDashboardData();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const handleClearDemoData = () => {
@@ -95,6 +112,16 @@ export default function AdminDashboard() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={loadDashboardData}
+            disabled={isRefreshing}
+            leftIcon={<RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />}
+          >
+            {isRefreshing ? 'Syncing...' : 'Refresh Data'}
+          </Button>
+
           <Button
             variant="outline"
             size="md"

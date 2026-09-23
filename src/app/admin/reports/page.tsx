@@ -22,11 +22,13 @@ import {
   TrendingUp,
   RotateCcw,
   FileText,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function AdminReportsPage() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Filter state
   const today = getTodayDateIST();
@@ -38,11 +40,6 @@ export default function AdminReportsPage() {
   // Report items
   const [reportItems, setReportItems] = useState<DetailedReportItem[]>([]);
 
-  useEffect(() => {
-    setDrivers(FleetStore.getDrivers());
-    setCompanies(FleetStore.getCompanies());
-  }, []);
-
   const filterCriteria: ReportFilterCriteria = useMemo(
     () => ({
       startDate,
@@ -53,9 +50,31 @@ export default function AdminReportsPage() {
     [startDate, endDate, selectedDriverId, selectedCompanyId]
   );
 
+  const refreshReportData = async () => {
+    setIsRefreshing(true);
+    try {
+      await FleetStore.syncWithSupabase();
+      setDrivers(FleetStore.getDrivers());
+      setCompanies(FleetStore.getCompanies());
+      const data = FleetStore.getDetailedReports(filterCriteria);
+      setReportItems(data);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    const data = FleetStore.getDetailedReports(filterCriteria);
-    setReportItems(data);
+    refreshReportData();
+
+    // Auto refresh every 15 seconds to reflect newly submitted driver entries
+    const interval = setInterval(refreshReportData, 15000);
+    const handleFocus = () => refreshReportData();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [filterCriteria]);
 
   // Aggregate metrics
@@ -63,10 +82,18 @@ export default function AdminReportsPage() {
     () => reportItems.reduce((sum, item) => sum + item.total_km, 0),
     [reportItems]
   );
-  const totalFuel = useMemo(
-    () => reportItems.reduce((sum, item) => sum + item.fuel_amount, 0),
-    [reportItems]
-  );
+  const totalFuel = useMemo(() => {
+    const fuelLogs = FleetStore.getFuelLogs();
+    return fuelLogs
+      .filter((f) => {
+        if (startDate && f.log_date < startDate) return false;
+        if (endDate && f.log_date > endDate) return false;
+        if (selectedDriverId !== 'ALL' && f.driver_id !== selectedDriverId) return false;
+        return true;
+      })
+      .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+  }, [startDate, endDate, selectedDriverId, reportItems]);
+
   const avgCostPerKm = totalKm > 0 ? parseFloat((totalFuel / totalKm).toFixed(2)) : 0;
 
   // Quick Preset Handlers
@@ -116,8 +143,17 @@ export default function AdminReportsPage() {
           </p>
         </div>
 
-        {/* EXPORT BUTTONS */}
+        {/* EXPORT & REFRESH BUTTONS */}
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshReportData}
+            disabled={isRefreshing}
+            leftIcon={<RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />}
+          >
+            {isRefreshing ? 'Syncing...' : 'Refresh'}
+          </Button>
           <Button
             variant="outline"
             size="sm"

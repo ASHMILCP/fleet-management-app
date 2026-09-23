@@ -274,9 +274,15 @@ export class FleetStore {
             password: ud.password || null,
           }).then(({ error }) => {
             if (!error) {
+              const rawCode = (ud.username || ud.full_name || '001')
+                .toUpperCase()
+                .replace(/[^A-Z0-9]/g, '')
+                .slice(0, 10);
+              const driverCode = 'DRV-' + (rawCode || ud.id.slice(0, 6).toUpperCase());
               supabase.from('drivers').upsert({
                 id: ud.id,
                 user_id: ud.id,
+                driver_id_code: driverCode,
                 status: ud.is_active ? 'ACTIVE' : 'INACTIVE',
               }).then(() => {}, () => {});
             }
@@ -292,15 +298,26 @@ export class FleetStore {
         const cloudSessions: DutySession[] = dRes.data.map((row: any) => ({
           id: row.id,
           driver_id: row.driver_id,
-          vehicle_id: row.vehicle_id,
+          vehicle_id: row.vehicle_id || localDrivers.find((d) => d.id === row.driver_id)?.assigned_vehicle_id,
           start_time: row.start_time,
           end_time: row.end_time || null,
-          status: row.status || (row.end_time ? 'COMPLETED' : 'ACTIVE'),
+          status: row.end_time ? 'COMPLETED' : 'ACTIVE',
           notes: row.notes,
           created_at: row.created_at || row.start_time || new Date().toISOString(),
         }));
         const cloudSessionIds = new Set(cloudSessions.map((s) => s.id));
         const unsyncedSessions = localSessions.filter((s) => !cloudSessionIds.has(s.id));
+        for (const us of unsyncedSessions) {
+          supabase.from('duty_sessions').upsert({
+            id: us.id,
+            driver_id: us.driver_id,
+            session_date: (us.start_time ? us.start_time.split('T')[0] : getTodayDateIST()),
+            start_time: us.start_time,
+            end_time: us.end_time || null,
+          }).then(({ error }) => {
+            if (error) console.error('Error auto-uploading duty session to Supabase:', error);
+          });
+        }
         const mergedSessions = [...cloudSessions, ...unsyncedSessions];
         setItem(STORAGE_KEYS.DUTY_SESSIONS, mergedSessions);
       }
@@ -316,7 +333,7 @@ export class FleetStore {
           duty_session_id: row.duty_session_id,
           one_side_km: row.entered_km || row.one_side_km || (row.total_km ? (row.trip_type === 'ONE_SIDE' ? row.total_km / 2 : row.total_km) : 0),
           trip_type: row.trip_type || 'ONE_SIDE',
-          multiplier: row.trip_type === 'TWO_SIDE' ? 1 : (row.multiplier || 2),
+          multiplier: row.km_multiplier || (row.trip_type === 'TWO_SIDE' ? 1 : (row.multiplier || 2)),
           total_km: Number(row.total_km || 0),
           trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
           notes: row.notes,
@@ -324,6 +341,22 @@ export class FleetStore {
         }));
         const cloudTripIds = new Set(cloudTrips.map((t) => t.id));
         const unsyncedTrips = localTrips.filter((t) => !cloudTripIds.has(t.id));
+        for (const ut of unsyncedTrips) {
+          supabase.from('trips').upsert({
+            id: ut.id,
+            driver_id: ut.driver_id,
+            company_id: ut.company_id,
+            vehicle_id: ut.vehicle_id || null,
+            entered_km: ut.one_side_km,
+            trip_type: ut.trip_type,
+            km_multiplier: ut.multiplier || (ut.trip_type === 'TWO_SIDE' ? 1 : 2),
+            total_km: ut.total_km,
+            trip_date: ut.trip_date,
+            notes: ut.notes || null,
+          }).then(({ error }) => {
+            if (error) console.error('Error auto-uploading trip to Supabase:', error);
+          });
+        }
         const mergedTrips = [...cloudTrips, ...unsyncedTrips];
         setItem(STORAGE_KEYS.TRIPS, mergedTrips);
       }
@@ -339,12 +372,25 @@ export class FleetStore {
           fuel_type: row.fuel_type || 'CNG',
           amount: Number(row.amount || 0),
           liters_or_kg: row.liters_or_kg || row.quantity,
-          log_date: row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          log_date: row.expense_date || row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
           notes: row.notes,
           created_at: row.created_at || new Date().toISOString(),
         }));
         const cloudFuelIds = new Set(cloudFuel.map((f) => f.id));
         const unsyncedFuel = localFuel.filter((f) => !cloudFuelIds.has(f.id));
+        for (const uf of unsyncedFuel) {
+          supabase.from('fuel_expenses').upsert({
+            id: uf.id,
+            driver_id: uf.driver_id,
+            vehicle_id: uf.vehicle_id || null,
+            fuel_type: uf.fuel_type || 'CNG',
+            amount: uf.amount,
+            expense_date: uf.log_date || getTodayDateIST(),
+            notes: uf.notes || null,
+          }).then(({ error }) => {
+            if (error) console.error('Error auto-uploading fuel log to Supabase:', error);
+          });
+        }
         const mergedFuel = [...cloudFuel, ...unsyncedFuel];
         setItem(STORAGE_KEYS.FUEL_LOGS, mergedFuel);
       }
@@ -584,11 +630,19 @@ export class FleetStore {
           if (error) {
             console.error('Supabase direct profile save error:', error);
           } else {
+            const rawCode = (resultDriver.username || resultDriver.full_name || '001')
+              .toUpperCase()
+              .replace(/[^A-Z0-9]/g, '')
+              .slice(0, 10);
+            const driverCode = 'DRV-' + (rawCode || targetId.slice(0, 6).toUpperCase());
             supabase.from('drivers').upsert({
               id: targetId,
               user_id: targetId,
+              driver_id_code: driverCode,
               status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
-            }).then(() => {}, () => {});
+            }).then(({ error: dErr }) => {
+              if (dErr) console.error('Supabase direct drivers upsert error:', dErr);
+            });
           }
         });
       };
@@ -795,7 +849,7 @@ export class FleetStore {
       supabase.from('duty_sessions').insert({
         id: newSession.id,
         driver_id: newSession.driver_id,
-        vehicle_id: newSession.vehicle_id || null,
+        session_date: getTodayDateIST(),
         start_time: newSession.start_time,
         end_time: null,
       }).then(({ error }) => {
@@ -817,7 +871,12 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('duty_sessions').update({ status: 'COMPLETED', end_time: active.end_time }).eq('id', active.id).then(({ error }) => {
+      const diffMs = active.start_time ? new Date(active.end_time).getTime() - new Date(active.start_time).getTime() : 0;
+      const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+      supabase.from('duty_sessions').update({
+        end_time: active.end_time,
+        total_working_minutes: totalMinutes,
+      }).eq('id', active.id).then(({ error }) => {
         if (error) console.error('Supabase end duty update error:', error);
       });
     }
@@ -849,8 +908,9 @@ export class FleetStore {
         vehicle_id: newTrip.vehicle_id || null,
         entered_km: newTrip.one_side_km,
         trip_type: newTrip.trip_type,
+        km_multiplier: newTrip.multiplier || (newTrip.trip_type === 'TWO_SIDE' ? 1 : 2),
         total_km: newTrip.total_km,
-        trip_date: newTrip.trip_date,
+        trip_date: newTrip.trip_date || getTodayDateIST(),
         notes: newTrip.notes || null,
       }).then(({ error }) => {
         if (error) console.error('Supabase direct trip insert error:', error);
@@ -883,6 +943,7 @@ export class FleetStore {
         vehicle_id: newFuel.vehicle_id || null,
         fuel_type: newFuel.fuel_type || 'CNG',
         amount: newFuel.amount,
+        expense_date: newFuel.log_date || getTodayDateIST(),
         notes: newFuel.notes || null,
       }).then(({ error }) => {
         if (error) console.error('Supabase direct fuel insert error:', error);
@@ -992,15 +1053,21 @@ export class FleetStore {
       return true;
     });
 
-    return filteredTrips.map((t) => {
+    const assignedFuelDates = new Set<string>();
+
+    const items: DetailedReportItem[] = filteredTrips.map((t) => {
       const driver = driverMap.get(t.driver_id);
       const company = companyMap.get(t.company_id);
       const vehicle = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
 
-      // Find any fuel logged by this driver on that trip date
-      const fuelOnDate = fuelLogs
-        .filter((f) => f.driver_id === t.driver_id && f.log_date === t.trip_date)
-        .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const dateKey = `${t.driver_id}_${t.trip_date}`;
+      let fuelOnDate = 0;
+      if (!assignedFuelDates.has(dateKey)) {
+        fuelOnDate = fuelLogs
+          .filter((f) => f.driver_id === t.driver_id && f.log_date === t.trip_date)
+          .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+        assignedFuelDates.add(dateKey);
+      }
 
       return {
         id: t.id,
@@ -1018,5 +1085,55 @@ export class FleetStore {
         notes: t.notes,
       };
     });
+
+    // Also include fuel expenses where driver had no trips on that day
+    if (filters.companyId === 'ALL') {
+      const filteredFuel = fuelLogs.filter((f) => {
+        if (filters.startDate && f.log_date < filters.startDate) return false;
+        if (filters.endDate && f.log_date > filters.endDate) return false;
+        if (filters.driverId !== 'ALL' && f.driver_id !== filters.driverId) return false;
+        const dateKey = `${f.driver_id}_${f.log_date}`;
+        return !assignedFuelDates.has(dateKey);
+      });
+
+      const standaloneMap = new Map<string, { driver_id: string; log_date: string; amount: number; notes?: string; vehicle_id?: string }>();
+      for (const f of filteredFuel) {
+        const key = `${f.driver_id}_${f.log_date}`;
+        const existing = standaloneMap.get(key);
+        if (existing) {
+          existing.amount += Number(f.amount || 0);
+        } else {
+          standaloneMap.set(key, {
+            driver_id: f.driver_id,
+            log_date: f.log_date,
+            amount: Number(f.amount || 0),
+            notes: f.notes,
+            vehicle_id: f.vehicle_id,
+          });
+        }
+      }
+
+      standaloneMap.forEach((entry, key) => {
+        const driver = driverMap.get(entry.driver_id);
+        const vehicle = entry.vehicle_id ? vehicleMap.get(entry.vehicle_id) : undefined;
+        items.push({
+          id: `fuel-${key}`,
+          trip_date: entry.log_date,
+          driver_name: driver?.full_name || 'Unknown Driver',
+          driver_phone: driver?.phone,
+          vehicle_reg: vehicle?.registration_number,
+          company_name: 'Fuel Log (Direct)',
+          trip_type: 'ONE_SIDE',
+          one_side_km: 0,
+          multiplier: 1,
+          total_km: 0,
+          fuel_amount: entry.amount,
+          created_at: entry.log_date + 'T12:00:00.000Z',
+          notes: entry.notes || 'Fuel Purchase',
+        });
+      });
+    }
+
+    return items.sort((a, b) => (b.trip_date > a.trip_date ? 1 : b.trip_date < a.trip_date ? -1 : 0));
   }
 }
