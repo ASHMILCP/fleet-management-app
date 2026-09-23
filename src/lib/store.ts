@@ -239,17 +239,16 @@ export class FleetStore {
         setItem(STORAGE_KEYS.COMPANIES, mergedCompanies);
       }
 
-      // 3. PROFILES / DRIVERS SYNC & MERGE
+      // 3. PROFILES / DRIVERS SYNC
       const localDrivers = this.getDrivers();
-      const deletedIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_DRIVERS, []));
       if (Array.isArray(pRes.data)) {
         const cloudProfiles: Profile[] = pRes.data
-          .filter((row: any) => !deletedIds.has(row.id))
+          .filter((row: any) => row.role === 'DRIVER' || !row.role)
           .map((row: any) => {
-            const existingLocal = localDrivers.find((d) => d.id === row.id || (row.phone && d.phone === row.phone) || (row.name && d.full_name === row.name));
+            const existingLocal = localDrivers.find((d) => d.id === row.id || (row.username && d.username === row.username));
             return {
               id: row.id,
-              role: (row.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+              role: 'DRIVER' as const,
               full_name: row.full_name || row.name || 'Unnamed Driver',
               phone: row.phone || existingLocal?.phone || '',
               username: row.username || existingLocal?.username || (row.name ? row.name.toLowerCase().replace(/\s+/g, '') : undefined),
@@ -261,35 +260,18 @@ export class FleetStore {
             };
           });
 
-        const cloudProfileIds = new Set(cloudProfiles.map((p) => p.id));
-        const unsyncedDrivers = localDrivers.filter((d) => !cloudProfileIds.has(d.id) && !deletedIds.has(d.id));
-        for (const ud of unsyncedDrivers) {
-          supabase.from('profiles').upsert({
-            id: ud.id,
-            name: ud.full_name,
-            phone: ud.phone || null,
-            role: 'DRIVER',
-            status: ud.is_active ? 'ACTIVE' : 'INACTIVE',
-            username: ud.username || null,
-            password: ud.password || null,
-          }).then(({ error }) => {
-            if (!error) {
-              const rawCode = (ud.username || ud.full_name || '001')
-                .toUpperCase()
-                .replace(/[^A-Z0-9]/g, '')
-                .slice(0, 10);
-              const driverCode = 'DRV-' + (rawCode || ud.id.slice(0, 6).toUpperCase());
-              supabase.from('drivers').upsert({
-                id: ud.id,
-                user_id: ud.id,
-                driver_id_code: driverCode,
-                status: ud.is_active ? 'ACTIVE' : 'INACTIVE',
-              }).then(() => {}, () => {});
-            }
-          });
+        // Supabase is the single source of truth for drivers.
+        // Replace local storage with active cloud profiles. NEVER re-upload deleted drivers!
+        setItem(STORAGE_KEYS.DRIVERS, cloudProfiles);
+
+        // If the currently logged-in user is a driver that was deleted from Supabase, log them out immediately
+        const current = this.getCurrentUser();
+        if (current && current.role === 'DRIVER') {
+          const stillExists = cloudProfiles.some((d) => d.id === current.id && d.is_active);
+          if (!stillExists) {
+            this.logout();
+          }
         }
-        const mergedDrivers = [...cloudProfiles, ...unsyncedDrivers];
-        setItem(STORAGE_KEYS.DRIVERS, mergedDrivers);
       }
 
       // 4. DUTY SESSIONS SYNC & MERGE
@@ -774,7 +756,7 @@ export class FleetStore {
       try {
         const supabase = createClient();
         const { data: profiles, error } = await supabase.from('profiles').select('*');
-        if (profiles && profiles.length > 0) {
+        if (!error && Array.isArray(profiles)) {
           const matched = profiles.find((d: any) => {
             const isActive = d.status ? d.status === 'ACTIVE' : (d.is_active !== undefined ? d.is_active : true);
             if (!isActive) return false;
@@ -800,6 +782,9 @@ export class FleetStore {
               created_at: matched.created_at || new Date().toISOString(),
             };
           }
+          // The database query succeeded and this user does not exist or was deleted.
+          // DENY LOGIN! Do NOT fall back to local storage!
+          return null;
         }
       } catch (err) {
         console.error('Supabase async auth check error:', err);

@@ -78,22 +78,22 @@ export default function LoginPage() {
               .eq('id', data.user.id)
               .maybeSingle();
 
-            const userProfile: Profile = profile
-              ? {
-                  id: profile.id,
-                  role: (profile.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
-                  full_name: profile.name || profile.full_name || inputUser,
-                  phone: profile.phone,
-                  is_active: profile.status ? profile.status === 'ACTIVE' : true,
-                  created_at: profile.created_at || new Date().toISOString(),
-                }
-              : {
-                  id: data.user.id,
-                  role: (data.user.user_metadata?.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
-                  full_name: data.user.user_metadata?.full_name || inputUser,
-                  is_active: true,
-                  created_at: new Date().toISOString(),
-                };
+            // If the profile does not exist in profiles table, or is inactive, the admin removed them!
+            if (!profile || (profile.status && profile.status !== 'ACTIVE')) {
+              await supabase.auth.signOut();
+              setErrorMsg('This driver account has been removed by the admin.');
+              setIsLoading(false);
+              return;
+            }
+
+            const userProfile: Profile = {
+              id: profile.id,
+              role: (profile.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+              full_name: profile.name || profile.full_name || inputUser,
+              phone: profile.phone,
+              is_active: true,
+              created_at: profile.created_at || new Date().toISOString(),
+            };
 
             FleetStore.setCurrentUser(userProfile);
             router.push(userProfile.role === 'ADMIN' ? '/admin' : '/driver');
