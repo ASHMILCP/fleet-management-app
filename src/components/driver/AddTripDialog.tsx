@@ -29,6 +29,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
 
   // Confirmation modal step
   const [isConfirmOpen, setIsConfirmOpen] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -64,31 +65,39 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
     setIsConfirmOpen(true);
   };
 
-  const handleFinalSubmit = () => {
-    const activeDuty = FleetStore.getActiveDutySession(driverId);
-    const driver = FleetStore.getCurrentUser();
+  const handleFinalSubmit = async () => {
+    setIsSubmitting(true);
+    try {
+      const activeDuty = FleetStore.getActiveDutySession(driverId);
+      const driver = FleetStore.getCurrentUser();
+      const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || undefined;
 
-    FleetStore.addTrip({
-      driver_id: driverId,
-      company_id: selectedCompanyId,
-      vehicle_id: activeDuty?.vehicle_id || driver?.assigned_vehicle_id,
-      duty_session_id: activeDuty?.id || null,
-      one_side_km: parsedKm,
-      trip_type: tripType,
-      multiplier,
-      total_km: calculatedTotalKm,
-      trip_date: getTodayDateIST(),
-      notes: notes.trim() || undefined,
-    });
+      await FleetStore.addTripAsync({
+        driver_id: driverId,
+        company_id: selectedCompanyId,
+        vehicle_id: vehicleId,
+        duty_session_id: activeDuty?.id || null,
+        one_side_km: parsedKm,
+        trip_type: tripType,
+        multiplier,
+        total_km: calculatedTotalKm,
+        trip_date: getTodayDateIST(),
+        notes: notes.trim() || undefined,
+      });
 
-    // Reset fields
-    setOneSideKm('');
-    setNotes('');
-    setTripType('ONE_SIDE');
-    setIsConfirmOpen(false);
-    onClose();
+      // Reset fields
+      setOneSideKm('');
+      setNotes('');
+      setTripType('ONE_SIDE');
+      setIsConfirmOpen(false);
+      onClose();
 
-    if (onTripAdded) onTripAdded();
+      if (onTripAdded) onTripAdded();
+    } catch (err: any) {
+      alert(`Could not save trip to cloud: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const selectedCompany = companies.find((c) => c.id === selectedCompanyId);
@@ -270,6 +279,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
             <Button
               variant="success"
               onClick={handleFinalSubmit}
+              isLoading={isSubmitting}
               leftIcon={<CheckCircle className="w-4 h-4" />}
             >
               Confirm &amp; Save Trip

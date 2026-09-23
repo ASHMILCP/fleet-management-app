@@ -55,21 +55,28 @@ export default function DriverDashboard() {
     setCurrentUser(user);
     setCompanies(FleetStore.getCompanies());
 
-    const summary = FleetStore.getDriverTodaySummary(user.id);
-    setTodaySummary(summary);
+    try {
+      const [summary, allTrips, allFuel] = await Promise.all([
+        FleetStore.fetchDriverTodaySummaryAsync(user.id),
+        FleetStore.fetchTripsAsync(),
+        FleetStore.fetchFuelLogsAsync(),
+      ]);
 
-    const today = getTodayDateIST();
-    const allTrips = FleetStore.getTrips();
-    const userTripsToday = allTrips.filter(
-      (t) => t.driver_id === user.id && t.trip_date === today
-    );
-    setTodayTrips(userTripsToday);
+      setTodaySummary(summary);
 
-    const allFuel = FleetStore.getFuelLogs();
-    const userFuelToday = allFuel.filter(
-      (f) => f.driver_id === user.id && f.log_date === today
-    );
-    setTodayFuelLogs(userFuelToday);
+      const today = getTodayDateIST();
+      const userTripsToday = allTrips.filter(
+        (t) => t.driver_id === user.id && t.trip_date === today
+      );
+      setTodayTrips(userTripsToday);
+
+      const userFuelToday = allFuel.filter(
+        (f) => f.driver_id === user.id && f.log_date === today
+      );
+      setTodayFuelLogs(userFuelToday);
+    } catch (err) {
+      console.error('Error refreshing driver data:', err);
+    }
   }, [router]);
 
   useEffect(() => {

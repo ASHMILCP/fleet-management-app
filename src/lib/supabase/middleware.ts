@@ -31,8 +31,10 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Supabase SSR client
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const DEFAULT_SUPABASE_URL = 'https://fxtjhnpdiheosuvfargg.supabase.co';
+  const DEFAULT_SUPABASE_KEY = 'sb_publishable_S-fybHl9ZAnFlzy78y-LCg_vspiZP4K';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
 
   // If no demo role and credentials are placeholder/sample, redirect protected routes to /login
   if (!demoRole || !supabaseUrl || supabaseUrl.includes('sample-fleet-app') || supabaseUrl.includes('your-project-id')) {

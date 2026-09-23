@@ -6,8 +6,9 @@ import { createClient, isLiveSupabaseConfigured } from '@/lib/supabase/client';
 import { FleetStore } from '@/lib/store';
 import { Profile } from '@/types';
 import { INITIAL_ADMIN } from '@/lib/mockData';
-import { Truck, Key, UserCheck, ShieldCheck, Lock } from 'lucide-react';
+import { Truck, Key, UserCheck, ShieldCheck, Lock, Smartphone, Download } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { usePwa } from '@/components/pwa/PwaContext';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const { openInstallModal, isInstalled, isIos } = usePwa();
   const isLiveSupabase = isLiveSupabaseConfigured();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -84,6 +86,18 @@ export default function LoginPage() {
               setErrorMsg('This driver account has been removed by the admin.');
               setIsLoading(false);
               return;
+            }
+
+            if (profile.role === 'DRIVER') {
+              const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', profile.id).maybeSingle();
+              if (!drvCheck) {
+                await supabase.from('drivers').upsert({
+                  id: profile.id,
+                  user_id: profile.id,
+                  driver_id_code: 'DRV-' + profile.id.slice(0, 6).toUpperCase(),
+                  status: 'ACTIVE',
+                });
+              }
             }
 
             const userProfile: Profile = {
@@ -193,6 +207,24 @@ export default function LoginPage() {
               Sign In
             </Button>
           </form>
+
+          {/* INSTALL AS WEB APP OPTION */}
+          {!isInstalled && (
+            <div className="mt-6 pt-5 border-t border-slate-800 text-center">
+              <button
+                type="button"
+                onClick={openInstallModal}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold transition-all shadow-xs hover:border-blue-500/50"
+              >
+                {isIos ? (
+                  <Smartphone className="w-3.5 h-3.5 text-blue-400" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-blue-400" />
+                )}
+                <span>Add FleetPro to Mobile Home Screen</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

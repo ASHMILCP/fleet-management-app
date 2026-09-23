@@ -50,14 +50,17 @@ export default function AdminDashboard() {
     setIsRefreshing(true);
     try {
       await FleetStore.syncWithSupabase();
-      const data = FleetStore.getAdminMetrics();
+      const [data, allSessions] = await Promise.all([
+        FleetStore.fetchAdminMetricsAsync(),
+        FleetStore.fetchDutySessionsAsync(),
+      ]);
       setMetrics(data);
-
-      const allSessions = FleetStore.getDutySessions();
-      setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE'));
+      setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE' || !s.end_time));
 
       setDrivers(FleetStore.getDrivers());
       setVehicles(FleetStore.getVehicles());
+    } catch (err) {
+      console.error('Error loading admin dashboard data:', err);
     } finally {
       setIsRefreshing(false);
     }

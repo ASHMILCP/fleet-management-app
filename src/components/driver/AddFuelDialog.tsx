@@ -26,8 +26,9 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
   const [litersOrKg, setLitersOrKg] = useState<string>('');
   const [date, setDate] = useState<string>(getTodayDateIST());
   const [notes, setNotes] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
@@ -35,27 +36,35 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
       return;
     }
 
-    const activeDuty = FleetStore.getActiveDutySession(driverId);
-    const driver = FleetStore.getCurrentUser();
+    setIsSubmitting(true);
+    try {
+      const activeDuty = FleetStore.getActiveDutySession(driverId);
+      const driver = FleetStore.getCurrentUser();
+      const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || undefined;
 
-    FleetStore.addFuelLog({
-      driver_id: driverId,
-      vehicle_id: activeDuty?.vehicle_id || driver?.assigned_vehicle_id,
-      duty_session_id: activeDuty?.id || null,
-      fuel_type: fuelType,
-      amount: parsedAmount,
-      liters_or_kg: litersOrKg ? parseFloat(litersOrKg) : null,
-      log_date: date || getTodayDateIST(),
-      notes: notes.trim() || undefined,
-    });
+      await FleetStore.addFuelLogAsync({
+        driver_id: driverId,
+        vehicle_id: vehicleId,
+        duty_session_id: activeDuty?.id || null,
+        fuel_type: fuelType,
+        amount: parsedAmount,
+        liters_or_kg: litersOrKg ? parseFloat(litersOrKg) : null,
+        log_date: date || getTodayDateIST(),
+        notes: notes.trim() || undefined,
+      });
 
-    // Reset fields
-    setAmount('');
-    setLitersOrKg('');
-    setNotes('');
-    onClose();
+      // Reset fields
+      setAmount('');
+      setLitersOrKg('');
+      setNotes('');
+      onClose();
 
-    if (onFuelAdded) onFuelAdded();
+      if (onFuelAdded) onFuelAdded();
+    } catch (err: any) {
+      alert(`Could not save fuel expense to cloud: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -171,7 +180,12 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" leftIcon={<CheckCircle className="w-4 h-4" />}>
+          <Button
+            type="submit"
+            variant="primary"
+            isLoading={isSubmitting}
+            leftIcon={<CheckCircle className="w-4 h-4" />}
+          >
             Record Fuel
           </Button>
         </div>

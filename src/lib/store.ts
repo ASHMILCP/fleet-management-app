@@ -374,7 +374,7 @@ export class FleetStore {
           duty_session_id: row.duty_session_id,
           one_side_km: row.entered_km || row.one_side_km || (row.total_km ? (row.trip_type === 'ONE_SIDE' ? row.total_km / 2 : row.total_km) : 0),
           trip_type: row.trip_type || 'ONE_SIDE',
-          multiplier: row.km_multiplier || (row.trip_type === 'TWO_SIDE' ? 1 : (row.multiplier || 2)),
+          multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
           total_km: Number(row.total_km || 0),
           trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
           notes: row.notes,
@@ -925,7 +925,23 @@ export class FleetStore {
             return uMatch && pMatch;
           });
           if (matched) {
-            return {
+            // Guarantee that this driver has a matching row in public.drivers table
+            // so trips, duty_sessions, and fuel_expenses foreign keys will never fail
+            if (matched.role !== 'ADMIN') {
+              const rawCode = (matched.username || matched.name || '001')
+                .toUpperCase()
+                .replace(/[^A-Z0-9]/g, '')
+                .slice(0, 10);
+              const driverCode = 'DRV-' + (rawCode || matched.id.slice(0, 6).toUpperCase());
+              await supabase.from('drivers').upsert({
+                id: matched.id,
+                user_id: matched.id,
+                driver_id_code: driverCode,
+                status: 'ACTIVE',
+              });
+            }
+
+            const driverProfile: Profile = {
               id: matched.id,
               role: matched.role || 'DRIVER',
               full_name: matched.name || matched.full_name || 'Driver',
@@ -937,9 +953,11 @@ export class FleetStore {
               is_active: true,
               created_at: matched.created_at || new Date().toISOString(),
             };
+
+            this.setCurrentUser(driverProfile);
+            return driverProfile;
           }
           // The database query succeeded and this user does not exist or was deleted.
-          // DENY LOGIN! Do NOT fall back to local storage!
           return null;
         }
       } catch (err) {
@@ -951,8 +969,72 @@ export class FleetStore {
   }
 
   // Duty Sessions
+  static async fetchDutySessionsAsync(): Promise<DutySession[]> {
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from('duty_sessions')
+          .select('*')
+          .order('start_time', { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+          const sessions: DutySession[] = data.map((d: any) => ({
+            id: d.id,
+            driver_id: d.driver_id,
+            vehicle_id: d.vehicle_id,
+            start_time: d.start_time,
+            end_time: d.end_time,
+            status: !d.end_time ? 'ACTIVE' : 'COMPLETED',
+            notes: d.notes,
+            created_at: d.created_at || d.start_time,
+          }));
+          setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
+          return sessions;
+        }
+      } catch (err) {
+        console.error('Supabase fetchDutySessionsAsync error:', err);
+      }
+    }
+    return this.getDutySessions();
+  }
+
   static getDutySessions(): DutySession[] {
     return getItem<DutySession[]>(STORAGE_KEYS.DUTY_SESSIONS, INITIAL_DUTY_SESSIONS);
+  }
+
+  static async getActiveDutySessionAsync(driverId: string): Promise<DutySession | null> {
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from('duty_sessions')
+          .select('*')
+          .eq('driver_id', driverId)
+          .is('end_time', null)
+          .order('start_time', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data) {
+          return {
+            id: data.id,
+            driver_id: data.driver_id,
+            vehicle_id: data.vehicle_id,
+            start_time: data.start_time,
+            end_time: data.end_time,
+            status: 'ACTIVE',
+            notes: data.notes,
+            created_at: data.created_at || data.start_time,
+          };
+        } else if (!error && !data) {
+          return null;
+        }
+      } catch (err) {
+        console.error('Supabase getActiveDutySessionAsync error:', err);
+      }
+    }
+    return this.getActiveDutySession(driverId);
   }
 
   static getActiveDutySession(driverId: string): DutySession | null {
@@ -962,15 +1044,7 @@ export class FleetStore {
     );
   }
 
-  static startDuty(driverId: string, vehicleId?: string, notes?: string): DutySession {
-    const sessions = this.getDutySessions();
-    sessions.forEach((s) => {
-      if (s.driver_id === driverId && s.status === 'ACTIVE') {
-        s.status = 'COMPLETED';
-        s.end_time = new Date().toISOString();
-      }
-    });
-
+  static async startDutyAsync(driverId: string, vehicleId?: string, notes?: string): Promise<DutySession> {
     const newSession: DutySession = {
       id: generateUUID(),
       driver_id: driverId,
@@ -982,67 +1056,185 @@ export class FleetStore {
       created_at: new Date().toISOString(),
     };
 
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        // Ensure driver exists in drivers table
+        const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', driverId).maybeSingle();
+        if (!drvCheck) {
+          const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', driverId).maybeSingle();
+          if (!drvUserCheck) {
+            await supabase.from('drivers').insert({
+              id: driverId,
+              user_id: driverId,
+              driver_id_code: 'DRV-' + driverId.slice(0, 6).toUpperCase(),
+              status: 'ACTIVE',
+            });
+          }
+        }
+
+        // Close any currently active sessions for this driver in Supabase
+        await supabase.from('duty_sessions').update({
+          end_time: new Date().toISOString(),
+        }).eq('driver_id', driverId).is('end_time', null);
+
+        const { data, error } = await supabase.from('duty_sessions').insert({
+          id: newSession.id,
+          driver_id: newSession.driver_id,
+          session_date: getTodayDateIST(),
+          start_time: newSession.start_time,
+          end_time: null,
+        }).select().single();
+
+        if (error) {
+          console.error('Supabase start duty insert error:', error);
+        } else if (data) {
+          newSession.id = data.id;
+        }
+      } catch (err) {
+        console.error('Supabase startDutyAsync error:', err);
+      }
+    }
+
+    const sessions = this.getDutySessions();
+    sessions.forEach((s) => {
+      if (s.driver_id === driverId && s.status === 'ACTIVE') {
+        s.status = 'COMPLETED';
+        s.end_time = new Date().toISOString();
+      }
+    });
     sessions.unshift(newSession);
     setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
-
-    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
-      const supabase = createClient();
-      supabase.from('duty_sessions').insert({
-        id: newSession.id,
-        driver_id: newSession.driver_id,
-        session_date: getTodayDateIST(),
-        start_time: newSession.start_time,
-        end_time: null,
-      }).then(({ error }) => {
-        if (error) console.error('Supabase start duty insert error:', error);
-      });
-    }
 
     return newSession;
   }
 
-  static endDuty(driverId: string): DutySession | null {
+  static startDuty(driverId: string, vehicleId?: string, notes?: string): DutySession {
+    this.startDutyAsync(driverId, vehicleId, notes);
     const sessions = this.getDutySessions();
-    const active = sessions.find((s) => s.driver_id === driverId && s.status === 'ACTIVE');
-    if (!active) return null;
-
-    active.status = 'COMPLETED';
-    active.end_time = new Date().toISOString();
-    setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
-
-    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
-      const supabase = createClient();
-      const diffMs = active.start_time ? new Date(active.end_time).getTime() - new Date(active.start_time).getTime() : 0;
-      const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
-      supabase.from('duty_sessions').update({
-        end_time: active.end_time,
-        total_working_minutes: totalMinutes,
-      }).eq('id', active.id).then(({ error }) => {
-        if (error) console.error('Supabase end duty update error:', error);
-      });
-    }
-
-    return active;
+    return sessions[0] || {
+      id: generateUUID(),
+      driver_id: driverId,
+      vehicle_id: vehicleId,
+      start_time: new Date().toISOString(),
+      end_time: null,
+      status: 'ACTIVE',
+      notes,
+      created_at: new Date().toISOString(),
+    };
   }
 
-  // Trips
+  static async endDutyAsync(driverId: string): Promise<DutySession | null> {
+    const sessions = this.getDutySessions();
+    const active = sessions.find((s) => s.driver_id === driverId && s.status === 'ACTIVE');
+    const nowIso = new Date().toISOString();
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const diffMs = active?.start_time ? new Date(nowIso).getTime() - new Date(active.start_time).getTime() : 0;
+        const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+
+        if (active?.id) {
+          await supabase.from('duty_sessions').update({
+            end_time: nowIso,
+            total_working_minutes: totalMinutes,
+          }).eq('id', active.id);
+        } else {
+          await supabase.from('duty_sessions').update({
+            end_time: nowIso,
+            total_working_minutes: totalMinutes,
+          }).eq('driver_id', driverId).is('end_time', null);
+        }
+      } catch (err) {
+        console.error('Supabase endDutyAsync error:', err);
+      }
+    }
+
+    if (active) {
+      active.status = 'COMPLETED';
+      active.end_time = nowIso;
+      setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
+    }
+    return active || null;
+  }
+
+  static endDuty(driverId: string): DutySession | null {
+    this.endDutyAsync(driverId);
+    const sessions = this.getDutySessions();
+    const active = sessions.find((s) => s.driver_id === driverId && s.status === 'ACTIVE');
+    if (active) {
+      active.status = 'COMPLETED';
+      active.end_time = new Date().toISOString();
+      setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
+    }
+    return active || null;
+  }
+
+  // Trips (Cloud-First)
   static getTrips(): Trip[] {
     return getItem<Trip[]>(STORAGE_KEYS.TRIPS, INITIAL_TRIPS);
   }
 
-  static addTrip(trip: Omit<Trip, 'id' | 'created_at'>): Trip {
-    const trips = this.getTrips();
+  static async fetchTripsAsync(): Promise<Trip[]> {
+    if (typeof window === 'undefined' || !isLiveSupabaseConfigured()) {
+      return this.getTrips();
+    }
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.from('trips').select('*').order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        const cloudTrips: Trip[] = data.map((row: any) => ({
+          id: row.id,
+          driver_id: row.driver_id,
+          company_id: row.company_id,
+          vehicle_id: row.vehicle_id,
+          duty_session_id: row.duty_session_id,
+          one_side_km: Number(row.entered_km || row.one_side_km || 0),
+          trip_type: row.trip_type || 'ONE_SIDE',
+          multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
+          total_km: Number(row.total_km || 0),
+          trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          notes: row.notes,
+          created_at: row.created_at || new Date().toISOString(),
+        }));
+        setItem(STORAGE_KEYS.TRIPS, cloudTrips);
+        return cloudTrips;
+      }
+    } catch (err) {
+      console.error('Supabase fetchTripsAsync error:', err);
+    }
+    return this.getTrips();
+  }
+
+  static async addTripAsync(trip: Omit<Trip, 'id' | 'created_at'>): Promise<Trip> {
+    const newId = generateUUID();
+    const today = trip.trip_date || getTodayDateIST();
     const newTrip: Trip = {
       ...trip,
-      id: generateUUID(),
+      id: newId,
+      trip_date: today,
       created_at: new Date().toISOString(),
     };
-    trips.unshift(newTrip);
-    setItem(STORAGE_KEYS.TRIPS, trips);
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('trips').insert({
+
+      // Ensure driver exists in drivers table to satisfy foreign key constraint
+      const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', newTrip.driver_id).maybeSingle();
+      if (!drvCheck) {
+        const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', newTrip.driver_id).maybeSingle();
+        if (!drvUserCheck) {
+          await supabase.from('drivers').insert({
+            id: newTrip.driver_id,
+            user_id: newTrip.driver_id,
+            driver_id_code: 'DRV-' + newTrip.driver_id.slice(0, 6).toUpperCase(),
+            status: 'ACTIVE',
+          });
+        }
+      }
+
+      const { data, error } = await supabase.from('trips').insert({
         id: newTrip.id,
         driver_id: newTrip.driver_id,
         company_id: newTrip.company_id,
@@ -1051,22 +1243,132 @@ export class FleetStore {
         trip_type: newTrip.trip_type,
         km_multiplier: newTrip.multiplier || (newTrip.trip_type === 'TWO_SIDE' ? 1 : 2),
         total_km: newTrip.total_km,
-        trip_date: newTrip.trip_date || getTodayDateIST(),
+        trip_date: today,
         notes: newTrip.notes || null,
-      }).then(({ error }) => {
-        if (error) console.error('Supabase direct trip insert error:', error);
-      });
+      }).select().single();
+
+      if (error) {
+        console.error('Supabase direct trip insert error:', error);
+        throw new Error(error.message || 'Failed to save trip to cloud database');
+      }
+
+      if (data) {
+        newTrip.id = data.id;
+        newTrip.created_at = data.created_at || newTrip.created_at;
+      }
     }
+
+    const trips = this.getTrips();
+    trips.unshift(newTrip);
+    setItem(STORAGE_KEYS.TRIPS, trips);
 
     return newTrip;
   }
 
-  // Fuel Logs
+  static addTrip(trip: Omit<Trip, 'id' | 'created_at'>): Trip {
+    this.addTripAsync(trip).catch((err) => console.error('addTrip fallback error:', err));
+    const trips = this.getTrips();
+    const newTrip: Trip = {
+      ...trip,
+      id: generateUUID(),
+      created_at: new Date().toISOString(),
+    };
+    trips.unshift(newTrip);
+    setItem(STORAGE_KEYS.TRIPS, trips);
+    return newTrip;
+  }
+
+  // Fuel Logs (Cloud-First)
   static getFuelLogs(): FuelLog[] {
     return getItem<FuelLog[]>(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
   }
 
+  static async fetchFuelLogsAsync(): Promise<FuelLog[]> {
+    if (typeof window === 'undefined' || !isLiveSupabaseConfigured()) {
+      return this.getFuelLogs();
+    }
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.from('fuel_expenses').select('*').order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        const cloudFuel: FuelLog[] = data.map((row: any) => ({
+          id: row.id,
+          driver_id: row.driver_id,
+          vehicle_id: row.vehicle_id,
+          duty_session_id: row.duty_session_id,
+          fuel_type: row.fuel_type || 'CNG',
+          amount: Number(row.amount || 0),
+          liters_or_kg: row.liters_or_kg || row.quantity,
+          log_date: row.expense_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          notes: row.notes,
+          created_at: row.created_at || new Date().toISOString(),
+        }));
+        setItem(STORAGE_KEYS.FUEL_LOGS, cloudFuel);
+        return cloudFuel;
+      }
+    } catch (err) {
+      console.error('Supabase fetchFuelLogsAsync error:', err);
+    }
+    return this.getFuelLogs();
+  }
+
+  static async addFuelLogAsync(fuel: Omit<FuelLog, 'id' | 'created_at'>): Promise<FuelLog> {
+    const newId = generateUUID();
+    const today = fuel.log_date || getTodayDateIST();
+    const newFuel: FuelLog = {
+      ...fuel,
+      id: newId,
+      log_date: today,
+      created_at: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+
+      // Ensure driver exists in drivers table
+      const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', newFuel.driver_id).maybeSingle();
+      if (!drvCheck) {
+        const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', newFuel.driver_id).maybeSingle();
+        if (!drvUserCheck) {
+          await supabase.from('drivers').insert({
+            id: newFuel.driver_id,
+            user_id: newFuel.driver_id,
+            driver_id_code: 'DRV-' + newFuel.driver_id.slice(0, 6).toUpperCase(),
+            status: 'ACTIVE',
+          });
+        }
+      }
+
+      const { data, error } = await supabase.from('fuel_expenses').insert({
+        id: newFuel.id,
+        driver_id: newFuel.driver_id,
+        vehicle_id: newFuel.vehicle_id || null,
+        fuel_type: newFuel.fuel_type || 'CNG',
+        amount: newFuel.amount,
+        expense_date: today,
+        notes: newFuel.notes || null,
+      }).select().single();
+
+      if (error) {
+        console.error('Supabase direct fuel insert error:', error);
+        throw new Error(error.message || 'Failed to save fuel expense to cloud database');
+      }
+
+      if (data) {
+        newFuel.id = data.id;
+        newFuel.created_at = data.created_at || newFuel.created_at;
+      }
+    }
+
+    const fuelLogs = this.getFuelLogs();
+    fuelLogs.unshift(newFuel);
+    setItem(STORAGE_KEYS.FUEL_LOGS, fuelLogs);
+
+    return newFuel;
+  }
+
   static addFuelLog(fuel: Omit<FuelLog, 'id' | 'created_at'>): FuelLog {
+    this.addFuelLogAsync(fuel).catch((err) => console.error('addFuelLog fallback error:', err));
     const fuelLogs = this.getFuelLogs();
     const newFuel: FuelLog = {
       ...fuel,
@@ -1075,26 +1377,67 @@ export class FleetStore {
     };
     fuelLogs.unshift(newFuel);
     setItem(STORAGE_KEYS.FUEL_LOGS, fuelLogs);
-
-    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
-      const supabase = createClient();
-      supabase.from('fuel_expenses').insert({
-        id: newFuel.id,
-        driver_id: newFuel.driver_id,
-        vehicle_id: newFuel.vehicle_id || null,
-        fuel_type: newFuel.fuel_type || 'CNG',
-        amount: newFuel.amount,
-        expense_date: newFuel.log_date || getTodayDateIST(),
-        notes: newFuel.notes || null,
-      }).then(({ error }) => {
-        if (error) console.error('Supabase direct fuel insert error:', error);
-      });
-    }
-
     return newFuel;
   }
 
-  // Today's Driver Summary
+  // Today's Driver Summary (Cloud-First)
+  static async fetchDriverTodaySummaryAsync(driverId: string): Promise<DriverTodaySummary> {
+    const today = getTodayDateIST();
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const [dRes, tRes, fRes] = await Promise.all([
+          supabase.from('duty_sessions').select('*').eq('driver_id', driverId),
+          supabase.from('trips').select('*').eq('driver_id', driverId).eq('trip_date', today),
+          supabase.from('fuel_expenses').select('*').eq('driver_id', driverId).eq('expense_date', today),
+        ]);
+
+        const sessions = Array.isArray(dRes.data) ? dRes.data : [];
+        const activeSession = sessions.find((s: any) => !s.end_time);
+        const todaySessions = sessions.filter((s: any) => s.session_date === today || (s.start_time && String(s.start_time).startsWith(today)));
+        const primarySession = activeSession || todaySessions[0] || null;
+
+        const startTime = primarySession ? primarySession.start_time : null;
+        const endTime = primarySession?.end_time || null;
+        const working = calculateWorkingHours(startTime, endTime);
+
+        const trips = Array.isArray(tRes.data) ? tRes.data : [];
+        const totalTrips = trips.length;
+        const totalKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
+
+        const fuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const fuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
+        const fuelCostPerKm = totalKm > 0 ? parseFloat((fuelExpense / totalKm).toFixed(2)) : 0;
+
+        return {
+          dutySession: primarySession ? {
+            id: primarySession.id,
+            driver_id: primarySession.driver_id,
+            vehicle_id: primarySession.vehicle_id,
+            start_time: primarySession.start_time,
+            end_time: primarySession.end_time,
+            status: primarySession.end_time ? 'COMPLETED' : 'ACTIVE',
+            notes: primarySession.notes,
+            created_at: primarySession.created_at || primarySession.start_time,
+          } : null,
+          startTime,
+          endTime,
+          workingHoursText: working?.text || '0h 00m',
+          workingHoursDecimal: working?.hoursDecimal || 0,
+          totalTrips,
+          totalKm,
+          fuelExpense,
+          fuelCostPerKm,
+        };
+      } catch (err) {
+        console.error('Supabase fetchDriverTodaySummaryAsync error:', err);
+      }
+    }
+
+    return this.getDriverTodaySummary(driverId);
+  }
+
   static getDriverTodaySummary(driverId: string): DriverTodaySummary {
     const today = getTodayDateIST();
     const allSessions = this.getDutySessions();
@@ -1138,7 +1481,52 @@ export class FleetStore {
     };
   }
 
-  // Admin Metrics
+  // Admin Metrics (Cloud-First)
+  static async fetchAdminMetricsAsync(): Promise<AdminSummaryMetrics> {
+    const today = getTodayDateIST();
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const [pRes, dRes, tRes, fRes] = await Promise.all([
+          supabase.from('profiles').select('*').eq('role', 'DRIVER'),
+          supabase.from('duty_sessions').select('*'),
+          supabase.from('trips').select('*').eq('trip_date', today),
+          supabase.from('fuel_expenses').select('*').eq('expense_date', today),
+        ]);
+
+        const drivers = Array.isArray(pRes.data) ? pRes.data : [];
+        const totalDrivers = drivers.length;
+        const activeDrivers = drivers.filter((d: any) => (d.status ? d.status === 'ACTIVE' : d.is_active !== false)).length;
+
+        const duty = Array.isArray(dRes.data) ? dRes.data : [];
+        const onDutyDrivers = duty.filter((s: any) => !s.end_time).length;
+
+        const trips = Array.isArray(tRes.data) ? tRes.data : [];
+        const todayTrips = trips.length;
+        const todayKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
+
+        const fuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const todayFuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
+        const todayFuelCostPerKm = todayKm > 0 ? parseFloat((todayFuelExpense / todayKm).toFixed(2)) : 0;
+
+        return {
+          totalDrivers,
+          activeDrivers,
+          onDutyDrivers,
+          todayTrips,
+          todayKm,
+          todayFuelExpense,
+          todayFuelCostPerKm,
+        };
+      } catch (err) {
+        console.error('Supabase fetchAdminMetricsAsync error:', err);
+      }
+    }
+
+    return this.getAdminMetrics();
+  }
+
   static getAdminMetrics(): AdminSummaryMetrics {
     const today = getTodayDateIST();
     const drivers = this.getDrivers();
@@ -1146,7 +1534,6 @@ export class FleetStore {
     const totalDrivers = drivers.length;
     const activeDrivers = activeDriverIds.size;
 
-    // Only count active duty sessions belonging to existing, active drivers
     const activeSessions = this.getDutySessions().filter(
       (s) => s.status === 'ACTIVE' && activeDriverIds.has(s.driver_id)
     );
@@ -1172,7 +1559,147 @@ export class FleetStore {
     };
   }
 
-  // Filtered Reports Data
+  // Filtered Reports Data (Cloud-First)
+  static async fetchDetailedReportsAsync(filters: ReportFilterCriteria): Promise<DetailedReportItem[]> {
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const [tRes, fRes, pRes, cRes, vRes] = await Promise.all([
+          supabase.from('trips').select('*'),
+          supabase.from('fuel_expenses').select('*'),
+          supabase.from('profiles').select('*'),
+          supabase.from('companies').select('*'),
+          supabase.from('vehicles').select('*'),
+        ]);
+
+        const trips = Array.isArray(tRes.data) ? tRes.data : [];
+        const fuelLogs = Array.isArray(fRes.data) ? fRes.data : [];
+        const drivers = Array.isArray(pRes.data) ? pRes.data : [];
+        const companies = Array.isArray(cRes.data) ? cRes.data : [];
+        const vehicles = Array.isArray(vRes.data) ? vRes.data : [];
+
+        const driverMap = new Map(drivers.map((d: any) => [d.id, d]));
+        const companyMap = new Map(companies.map((c: any) => [c.id, c]));
+        const vehicleMap = new Map(vehicles.map((v: any) => [v.id, v]));
+
+        // Filter trips
+        const filteredTrips = trips.filter((t: any) => {
+          if (filters.startDate && t.trip_date < filters.startDate) return false;
+          if (filters.endDate && t.trip_date > filters.endDate) return false;
+          if (filters.driverId !== 'ALL' && t.driver_id !== filters.driverId) return false;
+          if (filters.companyId !== 'ALL' && t.company_id !== filters.companyId) return false;
+          return true;
+        });
+
+        const assignedFuelDates = new Set<string>();
+
+        const items: DetailedReportItem[] = filteredTrips.map((t: any) => {
+          const driver = driverMap.get(t.driver_id);
+          const company = companyMap.get(t.company_id);
+          const vehicle = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
+
+          const dateKey = `${t.driver_id}_${t.trip_date}`;
+          let fuelOnDate = 0;
+          if (!assignedFuelDates.has(dateKey)) {
+            fuelOnDate = fuelLogs
+              .filter((f: any) => f.driver_id === t.driver_id && (f.expense_date === t.trip_date || f.log_date === t.trip_date))
+              .reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
+            assignedFuelDates.add(dateKey);
+          }
+
+          let ratePerKm = 0;
+          if (company?.notes && !isNaN(parseFloat(company.notes))) {
+            ratePerKm = parseFloat(company.notes);
+          } else if (company?.billing_rate_per_km !== undefined) {
+            ratePerKm = Number(company.billing_rate_per_km) || 0;
+          }
+
+          const totalKm = Number(t.total_km || 0);
+          const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
+          const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+
+          return {
+            id: t.id,
+            trip_date: t.trip_date,
+            driver_name: driver?.name || driver?.full_name || 'Driver',
+            driver_phone: driver?.phone,
+            vehicle_reg: vehicle?.registration_number,
+            company_name: company?.company_name || company?.name || 'Client',
+            billing_rate_per_km: ratePerKm,
+            trip_type: t.trip_type || 'ONE_SIDE',
+            one_side_km: Number(t.entered_km || t.one_side_km || 0),
+            multiplier: Number(t.km_multiplier || (t.trip_type === 'TWO_SIDE' ? 1 : 2)),
+            total_km: totalKm,
+            earnings: earnings,
+            fuel_amount: fuelOnDate,
+            net_profit: netProfit,
+            created_at: t.created_at || new Date().toISOString(),
+            notes: t.notes,
+          };
+        });
+
+        // Also include standalone fuel expenses where driver had no trips on that day
+        if (filters.companyId === 'ALL') {
+          const filteredFuel = fuelLogs.filter((f: any) => {
+            const fDate = f.expense_date || f.log_date;
+            if (filters.startDate && fDate < filters.startDate) return false;
+            if (filters.endDate && fDate > filters.endDate) return false;
+            if (filters.driverId !== 'ALL' && f.driver_id !== filters.driverId) return false;
+            const dateKey = `${f.driver_id}_${fDate}`;
+            return !assignedFuelDates.has(dateKey);
+          });
+
+          const standaloneMap = new Map<string, { driver_id: string; log_date: string; amount: number; notes?: string; vehicle_id?: string }>();
+          for (const f of filteredFuel) {
+            const fDate = f.expense_date || f.log_date;
+            const key = `${f.driver_id}_${fDate}`;
+            const existing = standaloneMap.get(key);
+            if (existing) {
+              existing.amount += Number(f.amount || 0);
+            } else {
+              standaloneMap.set(key, {
+                driver_id: f.driver_id,
+                log_date: fDate,
+                amount: Number(f.amount || 0),
+                notes: f.notes,
+                vehicle_id: f.vehicle_id,
+              });
+            }
+          }
+
+          standaloneMap.forEach((entry, key) => {
+            const driver = driverMap.get(entry.driver_id);
+            const vehicle = entry.vehicle_id ? vehicleMap.get(entry.vehicle_id) : undefined;
+            items.push({
+              id: `fuel-${key}`,
+              trip_date: entry.log_date,
+              driver_name: driver?.name || driver?.full_name || 'Driver',
+              driver_phone: driver?.phone,
+              vehicle_reg: vehicle?.registration_number,
+              company_name: 'Fuel Log (Direct)',
+              billing_rate_per_km: 0,
+              trip_type: 'ONE_SIDE',
+              one_side_km: 0,
+              multiplier: 1,
+              total_km: 0,
+              earnings: 0,
+              fuel_amount: entry.amount,
+              net_profit: -entry.amount,
+              created_at: entry.log_date + 'T12:00:00.000Z',
+              notes: entry.notes || 'Fuel Purchase',
+            });
+          });
+        }
+
+        return items.sort((a, b) => (b.trip_date > a.trip_date ? 1 : b.trip_date < a.trip_date ? -1 : 0));
+      } catch (err) {
+        console.error('Supabase fetchDetailedReportsAsync error:', err);
+      }
+    }
+
+    return this.getDetailedReports(filters);
+  }
+
   static getDetailedReports(filters: ReportFilterCriteria): DetailedReportItem[] {
     const trips = this.getTrips();
     const drivers = this.getDrivers();
@@ -1289,3 +1816,4 @@ export class FleetStore {
     return items.sort((a, b) => (b.trip_date > a.trip_date ? 1 : b.trip_date < a.trip_date ? -1 : 0));
   }
 }
+

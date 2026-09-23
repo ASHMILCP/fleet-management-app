@@ -32,7 +32,8 @@ export default function AdminReportsPage() {
 
   // Filter state
   const today = getTodayDateIST();
-  const [startDate, setStartDate] = useState<string>('2026-09-01');
+  const defaultStartDate = `${today.slice(0, 7)}-01`;
+  const [startDate, setStartDate] = useState<string>(defaultStartDate);
   const [endDate, setEndDate] = useState<string>(today);
   const [selectedDriverId, setSelectedDriverId] = useState<string>('ALL');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
@@ -56,8 +57,10 @@ export default function AdminReportsPage() {
       await FleetStore.syncWithSupabase();
       setDrivers(FleetStore.getDrivers());
       setCompanies(FleetStore.getCompanies());
-      const data = FleetStore.getDetailedReports(filterCriteria);
+      const data = await FleetStore.fetchDetailedReportsAsync(filterCriteria);
       setReportItems(data);
+    } catch (err) {
+      console.error('Error refreshing report data:', err);
     } finally {
       setIsRefreshing(false);
     }
@@ -87,16 +90,8 @@ export default function AdminReportsPage() {
     [reportItems]
   );
   const totalFuel = useMemo(() => {
-    const fuelLogs = FleetStore.getFuelLogs();
-    return fuelLogs
-      .filter((f) => {
-        if (startDate && f.log_date < startDate) return false;
-        if (endDate && f.log_date > endDate) return false;
-        if (selectedDriverId !== 'ALL' && f.driver_id !== selectedDriverId) return false;
-        return true;
-      })
-      .reduce((sum, f) => sum + Number(f.amount || 0), 0);
-  }, [startDate, endDate, selectedDriverId, reportItems]);
+    return reportItems.reduce((sum, item) => sum + (item.fuel_amount || 0), 0);
+  }, [reportItems]);
 
   const avgCostPerKm = totalKm > 0 ? parseFloat((totalFuel / totalKm).toFixed(2)) : 0;
   const netProfit = totalEarnings - totalFuel;
@@ -115,7 +110,7 @@ export default function AdminReportsPage() {
   };
 
   const handleResetFilters = () => {
-    setStartDate('2026-09-01');
+    setStartDate(defaultStartDate);
     setEndDate(today);
     setSelectedDriverId('ALL');
     setSelectedCompanyId('ALL');

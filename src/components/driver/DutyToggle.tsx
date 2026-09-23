@@ -22,10 +22,11 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
   const [isStartModalOpen, setIsStartModalOpen] = useState<boolean>(false);
   const [isEndModalOpen, setIsEndModalOpen] = useState<boolean>(false);
   const [elapsedTime, setElapsedTime] = useState<string>('00:00:00');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const loadDutyState = async () => {
     await FleetStore.syncWithSupabase();
-    const active = FleetStore.getActiveDutySession(driverId);
+    const active = await FleetStore.getActiveDutySessionAsync(driverId);
     setActiveSession(active);
     const activeVehicles = FleetStore.getActiveVehicles();
     setVehicles(activeVehicles);
@@ -65,19 +66,33 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
     return () => clearInterval(interval);
   }, [activeSession]);
 
-  const handleStartDuty = () => {
-    FleetStore.startDuty(driverId, selectedVehicleId || undefined, startNotes);
-    setIsStartModalOpen(false);
-    setStartNotes('');
-    loadDutyState();
-    if (onDutyChanged) onDutyChanged();
+  const handleStartDuty = async () => {
+    setIsSubmitting(true);
+    try {
+      await FleetStore.startDutyAsync(driverId, selectedVehicleId || undefined, startNotes);
+      setIsStartModalOpen(false);
+      setStartNotes('');
+      await loadDutyState();
+      if (onDutyChanged) onDutyChanged();
+    } catch (err: any) {
+      alert(`Could not start duty on cloud: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleEndDuty = () => {
-    FleetStore.endDuty(driverId);
-    setIsEndModalOpen(false);
-    loadDutyState();
-    if (onDutyChanged) onDutyChanged();
+  const handleEndDuty = async () => {
+    setIsSubmitting(true);
+    try {
+      await FleetStore.endDutyAsync(driverId);
+      setIsEndModalOpen(false);
+      await loadDutyState();
+      if (onDutyChanged) onDutyChanged();
+    } catch (err: any) {
+      alert(`Could not end duty on cloud: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const assignedVehicle = vehicles.find((v) => v.id === selectedVehicleId);
@@ -208,7 +223,12 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
             <Button variant="outline" onClick={() => setIsStartModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="success" onClick={handleStartDuty} leftIcon={<Play className="w-4 h-4" />}>
+            <Button
+              variant="success"
+              onClick={handleStartDuty}
+              isLoading={isSubmitting}
+              leftIcon={<Play className="w-4 h-4" />}
+            >
               Confirm &amp; Start Duty
             </Button>
           </div>
@@ -237,7 +257,12 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
             <Button variant="outline" onClick={() => setIsEndModalOpen(false)}>
               Keep Working
             </Button>
-            <Button variant="danger" onClick={handleEndDuty} leftIcon={<Square className="w-4 h-4" />}>
+            <Button
+              variant="danger"
+              onClick={handleEndDuty}
+              isLoading={isSubmitting}
+              leftIcon={<Square className="w-4 h-4" />}
+            >
               Yes, End Duty Now
             </Button>
           </div>
