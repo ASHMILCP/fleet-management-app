@@ -70,7 +70,8 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
     try {
       const activeDuty = FleetStore.getActiveDutySession(driverId);
       const driver = FleetStore.getCurrentUser();
-      const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || undefined;
+      const driverFromList = FleetStore.getDrivers().find((d) => d.id === driverId);
+      const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || driverFromList?.assigned_vehicle_id || undefined;
 
       await FleetStore.addTripAsync({
         driver_id: driverId,

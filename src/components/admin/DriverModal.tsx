@@ -54,7 +54,9 @@ export const DriverModal: React.FC<DriverModalProps> = ({
     }
   }, [isOpen, driver]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
       alert('Please enter the driver full name');
@@ -66,19 +68,26 @@ export const DriverModal: React.FC<DriverModalProps> = ({
       return;
     }
 
-    FleetStore.saveDriver({
-      id: driver?.id,
-      full_name: fullName.trim(),
-      username: username.trim() || undefined,
-      password: password.trim() || undefined,
-      phone: phone.trim() || undefined,
-      license_number: licenseNumber.trim() || undefined,
-      assigned_vehicle_id: assignedVehicleId || undefined,
-      is_active: isActive,
-    });
+    setIsSaving(true);
+    try {
+      await FleetStore.saveDriverAsync({
+        id: driver?.id,
+        full_name: fullName.trim(),
+        username: username.trim() || undefined,
+        password: password.trim() || undefined,
+        phone: phone.trim() || undefined,
+        license_number: licenseNumber.trim() || undefined,
+        assigned_vehicle_id: assignedVehicleId || undefined,
+        is_active: isActive,
+      });
 
-    onSave();
-    onClose();
+      onSave();
+      onClose();
+    } catch (err: any) {
+      alert(`Error saving driver: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -210,11 +219,11 @@ export const DriverModal: React.FC<DriverModalProps> = ({
         </div>
 
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary">
-            {driver ? 'Update Driver' : 'Save Driver'}
+          <Button type="submit" variant="primary" disabled={isSaving}>
+            {isSaving ? 'Saving...' : driver ? 'Update Driver' : 'Save Driver'}
           </Button>
         </div>
       </form>

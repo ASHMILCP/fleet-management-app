@@ -33,8 +33,13 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
 
     if (active?.vehicle_id) {
       setSelectedVehicleId(active.vehicle_id);
-    } else if (activeVehicles.length > 0) {
-      setSelectedVehicleId(activeVehicles[0].id);
+    } else {
+      const driver = FleetStore.getDrivers().find((d) => d.id === driverId) || FleetStore.getCurrentUser();
+      if (driver?.assigned_vehicle_id) {
+        setSelectedVehicleId(driver.assigned_vehicle_id);
+      } else if (activeVehicles.length > 0) {
+        setSelectedVehicleId(activeVehicles[0].id);
+      }
     }
   };
 

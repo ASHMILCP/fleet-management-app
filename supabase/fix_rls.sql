@@ -79,3 +79,7 @@ BEGIN
         ALTER TABLE public.fuel_expenses DROP CONSTRAINT IF EXISTS fuel_expenses_driver_id_fkey;
     END IF;
 END $$;
+
+-- 10. Optional assigned_vehicle_id column on profiles table
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS assigned_vehicle_id UUID;
+

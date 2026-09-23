@@ -207,13 +207,14 @@ export class FleetStore {
     if (typeof window === 'undefined' || !isLiveSupabaseConfigured()) return;
     try {
       const supabase = createClient();
-      const [vRes, cRes, pRes, dRes, tRes, fRes] = await Promise.all([
+      const [vRes, cRes, pRes, dRes, tRes, fRes, drvRes] = await Promise.all([
         supabase.from('vehicles').select('*'),
         supabase.from('companies').select('*'),
         supabase.from('profiles').select('*'),
         supabase.from('duty_sessions').select('*'),
         supabase.from('trips').select('*'),
         supabase.from('fuel_expenses').select('*'),
+        supabase.from('drivers').select('*'),
       ]);
 
       // 1. VEHICLES SYNC
@@ -280,6 +281,16 @@ export class FleetStore {
 
       // 3. PROFILES / DRIVERS SYNC
       const localDrivers = this.getDrivers();
+      
+      // Build a map of driver ID/user_id to vehicle_id from Supabase drivers table
+      const driverVehicleMap = new Map<string, string | null>();
+      if (Array.isArray(drvRes.data)) {
+        for (const drv of drvRes.data) {
+          if (drv.id) driverVehicleMap.set(drv.id, drv.vehicle_id || null);
+          if (drv.user_id) driverVehicleMap.set(drv.user_id, drv.vehicle_id || null);
+        }
+      }
+
       if (Array.isArray(pRes.data)) {
         // Sync cloud admin if present
         const adminRow = pRes.data.find((row: any) => row.role === 'ADMIN' || row.id === INITIAL_ADMIN.id);
@@ -310,6 +321,24 @@ export class FleetStore {
             seenIds.add(row.id);
             seenUsernames.add(rawUser);
             const existingLocal = localDrivers.find((d) => d.id === row.id || (row.username && d.username === row.username));
+            
+            // Resolve assigned vehicle:
+            // 1. Check Supabase drivers table mapping by id or user_id
+            // 2. Check row.assigned_vehicle_id or row.vehicle_id
+            // 3. Fallback to existing local driver assignment
+            let resolvedVehicleId: string | undefined = undefined;
+            if (driverVehicleMap.has(row.id)) {
+              resolvedVehicleId = driverVehicleMap.get(row.id) || undefined;
+            } else if (row.user_id && driverVehicleMap.has(row.user_id)) {
+              resolvedVehicleId = driverVehicleMap.get(row.user_id) || undefined;
+            } else if (row.assigned_vehicle_id) {
+              resolvedVehicleId = row.assigned_vehicle_id;
+            } else if (row.vehicle_id) {
+              resolvedVehicleId = row.vehicle_id;
+            } else if (existingLocal?.assigned_vehicle_id) {
+              resolvedVehicleId = existingLocal.assigned_vehicle_id;
+            }
+
             cloudProfiles.push({
               id: row.id,
               role: 'DRIVER' as const,
@@ -318,7 +347,7 @@ export class FleetStore {
               username: row.username || existingLocal?.username || (row.name ? row.name.toLowerCase().replace(/\s+/g, '') : undefined),
               password: row.password || existingLocal?.password,
               license_number: row.license_number || existingLocal?.license_number,
-              assigned_vehicle_id: row.assigned_vehicle_id || existingLocal?.assigned_vehicle_id,
+              assigned_vehicle_id: resolvedVehicleId,
               is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
               created_at: row.created_at || existingLocal?.created_at || new Date().toISOString(),
             });
@@ -326,12 +355,17 @@ export class FleetStore {
         }
         setItem(STORAGE_KEYS.DRIVERS, cloudProfiles);
 
-        // If the currently logged-in user is a driver that was deleted from Supabase, log them out immediately
+        // If the currently logged-in user is a driver, keep their session profile in sync
         const current = this.getCurrentUser();
         if (current && current.role === 'DRIVER') {
-          const stillExists = cloudProfiles.some((d) => d.id === current.id && d.is_active);
-          if (!stillExists) {
+          const matchedProfile = cloudProfiles.find((d) => d.id === current.id && d.is_active);
+          if (!matchedProfile) {
             this.logout();
+          } else {
+            this.setCurrentUser({
+              ...current,
+              ...matchedProfile,
+            });
           }
         }
       }
@@ -687,7 +721,7 @@ export class FleetStore {
     return this.getDrivers().filter((d) => d.is_active);
   }
 
-  static saveDriver(driver: Partial<Profile> & { full_name: string }): Profile {
+  static async saveDriverAsync(driver: Partial<Profile> & { full_name: string }): Promise<Profile> {
     const drivers = this.getDrivers();
     let resultDriver: Profile;
     const cleanUser = driver.username?.trim().toLowerCase();
@@ -726,10 +760,20 @@ export class FleetStore {
     }
     setItem(STORAGE_KEYS.DRIVERS, drivers);
 
+    // If current logged-in user is this driver, keep session updated immediately
+    const current = this.getCurrentUser();
+    if (current && current.id === resultDriver.id) {
+      this.setCurrentUser({
+        ...current,
+        ...resultDriver,
+      });
+    }
+
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
-      const supabase = createClient();
-      
-      const persistProfile = (targetId: string) => {
+      try {
+        const supabase = createClient();
+        const targetId = resultDriver.id;
+
         const payload: Record<string, any> = {
           id: targetId,
           name: resultDriver.full_name,
@@ -740,50 +784,125 @@ export class FleetStore {
         if (resultDriver.username) payload.username = resultDriver.username;
         if (resultDriver.password) payload.password = resultDriver.password;
 
-        supabase.from('profiles').upsert(payload).then(({ error }) => {
-          if (error) {
-            console.error('Supabase direct profile save error:', error);
-          } else {
-            const rawCode = (resultDriver.username || resultDriver.full_name || '001')
-              .toUpperCase()
-              .replace(/[^A-Z0-9]/g, '')
-              .slice(0, 10);
-            const driverCode = 'DRV-' + (rawCode || targetId.slice(0, 6).toUpperCase());
-            supabase.from('drivers').upsert({
-              id: targetId,
-              user_id: targetId,
-              driver_id_code: driverCode,
-              status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
-            }).then(({ error: dErr }) => {
-              if (dErr) console.error('Supabase direct drivers upsert error:', dErr);
-            });
-          }
+        const { error: pErr } = await supabase.from('profiles').upsert(payload);
+        if (pErr) console.error('Supabase direct profile save error:', pErr);
+
+        const rawCode = (resultDriver.username || resultDriver.full_name || '001')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, '')
+          .slice(0, 10);
+        const driverCode = 'DRV-' + (rawCode || targetId.slice(0, 6).toUpperCase());
+        const targetVehId = resultDriver.assigned_vehicle_id || null;
+
+        // Upsert to drivers table with vehicle_id
+        const { error: dErr } = await supabase.from('drivers').upsert({
+          id: targetId,
+          user_id: targetId,
+          driver_id_code: driverCode,
+          vehicle_id: targetVehId,
+          status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
         });
-      };
+        if (dErr) console.error('Supabase direct drivers upsert error:', dErr);
 
-      // Persist profile immediately to Supabase Cloud Database
-      persistProfile(resultDriver.id);
+        // Also run direct update on drivers table to guarantee vehicle_id is written regardless of primary keying
+        await supabase.from('drivers').update({
+          vehicle_id: targetVehId,
+          status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+        }).or(`id.eq.${targetId},user_id.eq.${targetId}`);
 
-      // Optionally register with Supabase Auth in background if credentials provided
-      if (isNew && resultDriver.username && resultDriver.password) {
-        const email = resultDriver.username.includes('@') 
-          ? resultDriver.username 
-          : `${resultDriver.username.replace(/[^a-zA-Z0-9]/g, '')}@fleetapp.com`;
-        
-        supabase.auth.signUp({
-          email,
-          password: resultDriver.password,
-        }).then(({ data, error }) => {
-          if (!error && data?.user?.id && data.user.id !== resultDriver.id) {
-            const oldId = resultDriver.id;
-            resultDriver.id = data.user.id;
-            const updatedDrivers = this.getDrivers().map((d) => (d.id === oldId ? resultDriver : d));
-            setItem(STORAGE_KEYS.DRIVERS, updatedDrivers);
-            persistProfile(data.user.id);
-          }
-        }).catch(() => {});
+        // Try updating profiles.assigned_vehicle_id if column exists
+        try {
+          await supabase.from('profiles').update({
+            assigned_vehicle_id: targetVehId,
+          }).eq('id', targetId);
+        } catch {
+          // profiles.assigned_vehicle_id column optional
+        }
+
+        // Background auth signup if new driver with credentials
+        if (isNew && resultDriver.username && resultDriver.password) {
+          const email = resultDriver.username.includes('@') 
+            ? resultDriver.username 
+            : `${resultDriver.username.replace(/[^a-zA-Z0-9]/g, '')}@fleetapp.com`;
+          
+          supabase.auth.signUp({
+            email,
+            password: resultDriver.password,
+          }).then(async ({ data, error }) => {
+            if (!error && data?.user?.id && data.user.id !== resultDriver.id) {
+              const oldId = resultDriver.id;
+              resultDriver.id = data.user.id;
+              const updatedDrivers = this.getDrivers().map((d) => (d.id === oldId ? resultDriver : d));
+              setItem(STORAGE_KEYS.DRIVERS, updatedDrivers);
+              
+              await supabase.from('profiles').upsert({
+                id: data.user.id,
+                name: resultDriver.full_name,
+                phone: resultDriver.phone || null,
+                role: 'DRIVER',
+                status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+                username: resultDriver.username,
+                password: resultDriver.password,
+              });
+
+              await supabase.from('drivers').upsert({
+                id: data.user.id,
+                user_id: data.user.id,
+                driver_id_code: driverCode,
+                vehicle_id: targetVehId,
+                status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+              });
+            }
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.error('Supabase saveDriverAsync error:', err);
       }
     }
+
+    return resultDriver;
+  }
+
+  static saveDriver(driver: Partial<Profile> & { full_name: string }): Profile {
+    const drivers = this.getDrivers();
+    let resultDriver: Profile;
+    const cleanUser = driver.username?.trim().toLowerCase();
+
+    const existingById = driver.id ? drivers.find((d) => d.id === driver.id) : null;
+    const existingByUser = !driver.id && cleanUser ? drivers.find((d) => d.username?.toLowerCase() === cleanUser) : null;
+    const target = existingById || existingByUser;
+
+    if (target) {
+      const idx = drivers.findIndex((d) => d.id === target.id);
+      const updateData: Partial<Profile> = { ...driver, id: target.id };
+      if (!driver.password) {
+        delete updateData.password;
+      }
+      resultDriver = { ...target, ...updateData } as Profile;
+      if (idx !== -1) {
+        drivers[idx] = resultDriver;
+      } else {
+        drivers.unshift(resultDriver);
+      }
+    } else {
+      resultDriver = {
+        id: generateUUID(),
+        role: 'DRIVER',
+        full_name: driver.full_name.trim(),
+        username: driver.username?.trim(),
+        password: driver.password?.trim(),
+        phone: driver.phone?.trim(),
+        license_number: driver.license_number?.trim(),
+        assigned_vehicle_id: driver.assigned_vehicle_id,
+        is_active: driver.is_active !== undefined ? driver.is_active : true,
+        created_at: new Date().toISOString(),
+      };
+      drivers.unshift(resultDriver);
+    }
+    setItem(STORAGE_KEYS.DRIVERS, drivers);
+
+    // Call async persistence in background
+    this.saveDriverAsync(driver).catch((e) => console.error('saveDriver background error:', e));
 
     return resultDriver;
   }
@@ -845,8 +964,12 @@ export class FleetStore {
 
       if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
         const supabase = createClient();
-        supabase.from('profiles').update({ status: drivers[idx].is_active ? 'ACTIVE' : 'INACTIVE' }).eq('id', id).then(({ error }) => {
+        const newStatus = drivers[idx].is_active ? 'ACTIVE' : 'INACTIVE';
+        supabase.from('profiles').update({ status: newStatus }).eq('id', id).then(({ error }) => {
           if (error) console.error('Supabase toggle driver status error:', error);
+        });
+        supabase.from('drivers').update({ status: newStatus }).or(`id.eq.${id},user_id.eq.${id}`).then(({ error }) => {
+          if (error) console.error('Supabase toggle drivers table status error:', error);
         });
       }
     }
@@ -928,6 +1051,8 @@ export class FleetStore {
             return uMatch && pMatch;
           });
           if (matched) {
+            let assignedVehId = matched.assigned_vehicle_id;
+
             // Guarantee that this driver has a matching row in public.drivers table
             // so trips, duty_sessions, and fuel_expenses foreign keys will never fail
             if (matched.role !== 'ADMIN') {
@@ -936,10 +1061,23 @@ export class FleetStore {
                 .replace(/[^A-Z0-9]/g, '')
                 .slice(0, 10);
               const driverCode = 'DRV-' + (rawCode || matched.id.slice(0, 6).toUpperCase());
+
+              // Look up drivers table to get current vehicle_id
+              const { data: drvRow } = await supabase
+                .from('drivers')
+                .select('*')
+                .or(`id.eq.${matched.id},user_id.eq.${matched.id}`)
+                .maybeSingle();
+
+              if (drvRow?.vehicle_id) {
+                assignedVehId = drvRow.vehicle_id;
+              }
+
               await supabase.from('drivers').upsert({
                 id: matched.id,
                 user_id: matched.id,
-                driver_id_code: driverCode,
+                driver_id_code: drvRow?.driver_id_code || driverCode,
+                vehicle_id: assignedVehId || null,
                 status: 'ACTIVE',
               });
             }
@@ -952,7 +1090,7 @@ export class FleetStore {
               password: matched.password,
               phone: matched.phone,
               license_number: matched.license_number,
-              assigned_vehicle_id: matched.assigned_vehicle_id,
+              assigned_vehicle_id: assignedVehId,
               is_active: true,
               created_at: matched.created_at || new Date().toISOString(),
             };
@@ -1831,12 +1969,21 @@ export class FleetStore {
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        const [dRes, pRes, vRes, tRes] = await Promise.all([
+        const [dRes, pRes, vRes, tRes, drvRes] = await Promise.all([
           supabase.from('duty_sessions').select('*').order('start_time', { ascending: false }),
           supabase.from('profiles').select('*'),
           supabase.from('vehicles').select('*'),
           supabase.from('trips').select('*'),
+          supabase.from('drivers').select('*'),
         ]);
+
+        const drvMap = new Map<string, string | null>();
+        if (Array.isArray(drvRes.data)) {
+          for (const drv of drvRes.data) {
+            if (drv.id) drvMap.set(drv.id, drv.vehicle_id || null);
+            if (drv.user_id) drvMap.set(drv.user_id, drv.vehicle_id || null);
+          }
+        }
 
         if (Array.isArray(dRes.data)) rawSessions = dRes.data;
         if (Array.isArray(pRes.data)) {
@@ -1848,7 +1995,7 @@ export class FleetStore {
             password: p.password,
             phone: p.phone,
             license_number: p.license_number,
-            assigned_vehicle_id: p.assigned_vehicle_id,
+            assigned_vehicle_id: drvMap.get(p.id) || drvMap.get(p.user_id) || p.assigned_vehicle_id || undefined,
             is_active: p.status ? p.status === 'ACTIVE' : true,
             created_at: p.created_at || new Date().toISOString(),
           }));
@@ -2000,11 +2147,20 @@ export class FleetStore {
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        const [aRes, pRes, dRes] = await Promise.all([
+        const [aRes, pRes, dRes, drvRes] = await Promise.all([
           supabase.from('login_audits').select('*').order('login_time', { ascending: false }),
           supabase.from('profiles').select('*'),
           supabase.from('duty_sessions').select('*').order('start_time', { ascending: false }),
+          supabase.from('drivers').select('*'),
         ]);
+
+        const drvMap = new Map<string, string | null>();
+        if (Array.isArray(drvRes.data)) {
+          for (const drv of drvRes.data) {
+            if (drv.id) drvMap.set(drv.id, drv.vehicle_id || null);
+            if (drv.user_id) drvMap.set(drv.user_id, drv.vehicle_id || null);
+          }
+        }
 
         if (Array.isArray(aRes.data) && aRes.data.length > 0) {
           audits = aRes.data.map((a: any) => ({
@@ -2029,7 +2185,7 @@ export class FleetStore {
             password: p.password,
             phone: p.phone,
             license_number: p.license_number,
-            assigned_vehicle_id: p.assigned_vehicle_id,
+            assigned_vehicle_id: drvMap.get(p.id) || drvMap.get(p.user_id) || p.assigned_vehicle_id || undefined,
             is_active: p.status ? p.status === 'ACTIVE' : true,
             created_at: p.created_at || new Date().toISOString(),
           }));
