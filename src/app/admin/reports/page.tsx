@@ -66,32 +66,11 @@ export default function AdminReportsPage() {
   const [workingHoursItems, setWorkingHoursItems] = useState<DutySessionReportItem[]>([]);
   const [loginAuditItems, setLoginAuditItems] = useState<LoginAuditItem[]>([]);
 
-  // Find Nihal driver object (from live database or store)
-  const nihalDriver = useMemo(() => {
-    return (
-      drivers.find(
-        (d) =>
-          d.full_name?.toLowerCase().includes('nihal') ||
-          d.username?.toLowerCase() === 'nihal'
-      ) || null
-    );
-  }, [drivers]);
-
   // Selected driver object if specific driver is selected
   const activeSelectedDriver = useMemo(() => {
     if (selectedDriverId === 'ALL') return null;
     return drivers.find((d) => d.id === selectedDriverId) || null;
   }, [drivers, selectedDriverId]);
-
-  const isNihalSelected = useMemo(() => {
-    return (
-      selectedDriverId !== 'ALL' &&
-      nihalDriver &&
-      (selectedDriverId === nihalDriver.id ||
-        activeSelectedDriver?.username?.toLowerCase() === 'nihal' ||
-        activeSelectedDriver?.full_name?.toLowerCase().includes('nihal'))
-    );
-  }, [selectedDriverId, nihalDriver, activeSelectedDriver]);
 
   const filterCriteria: ReportFilterCriteria = useMemo(
     () => ({
@@ -205,19 +184,6 @@ export default function AdminReportsPage() {
     setSelectedCompanyId('ALL');
   };
 
-  // One-Click "Check Nihal" Quick Action
-  const handleToggleCheckNihal = (preferredTab?: 'trips' | 'hours' | 'logins') => {
-    if (nihalDriver) {
-      if (selectedDriverId === nihalDriver.id && !preferredTab) {
-        // Toggle off back to all
-        setSelectedDriverId('ALL');
-      } else {
-        setSelectedDriverId(nihalDriver.id);
-        if (preferredTab) setActiveTab(preferredTab);
-      }
-    }
-  };
-
   const togglePasswordVisibility = (driverId: string) => {
     setVisiblePasswords((prev) => ({
       ...prev,
@@ -225,22 +191,26 @@ export default function AdminReportsPage() {
     }));
   };
 
+  const driverFilePrefix = activeSelectedDriver
+    ? `${activeSelectedDriver.username || activeSelectedDriver.full_name.toLowerCase().replace(/\s+/g, '-')}-`
+    : '';
+
   // Context-Aware Export handlers
   const handleExportExcel = () => {
     if (activeTab === 'hours') {
       exportWorkingHoursToExcel(
         workingHoursItems,
-        `working-hours-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.xlsx`
+        `working-hours-${driverFilePrefix}${startDate}-to-${endDate}.xlsx`
       );
     } else if (activeTab === 'logins') {
       exportLoginDetailsToExcel(
         loginAuditItems,
-        `login-details-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.xlsx`
+        `login-details-${driverFilePrefix}${startDate}-to-${endDate}.xlsx`
       );
     } else {
       exportToExcel(
         reportItems,
-        `fleet-report-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.xlsx`
+        `fleet-report-${driverFilePrefix}${startDate}-to-${endDate}.xlsx`
       );
     }
   };
@@ -249,17 +219,17 @@ export default function AdminReportsPage() {
     if (activeTab === 'hours') {
       exportWorkingHoursToCSV(
         workingHoursItems,
-        `working-hours-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.csv`
+        `working-hours-${driverFilePrefix}${startDate}-to-${endDate}.csv`
       );
     } else if (activeTab === 'logins') {
       exportLoginDetailsToCSV(
         loginAuditItems,
-        `login-details-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.csv`
+        `login-details-${driverFilePrefix}${startDate}-to-${endDate}.csv`
       );
     } else {
       exportToCSV(
         reportItems,
-        `fleet-report-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.csv`
+        `fleet-report-${driverFilePrefix}${startDate}-to-${endDate}.csv`
       );
     }
   };
@@ -269,19 +239,19 @@ export default function AdminReportsPage() {
       exportWorkingHoursToPDF(
         workingHoursItems,
         filterCriteria,
-        `working-hours-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.pdf`
+        `working-hours-${driverFilePrefix}${startDate}-to-${endDate}.pdf`
       );
     } else if (activeTab === 'logins') {
       exportLoginDetailsToPDF(
         loginAuditItems,
         filterCriteria,
-        `login-details-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.pdf`
+        `login-details-${driverFilePrefix}${startDate}-to-${endDate}.pdf`
       );
     } else {
       exportToPDF(
         reportItems,
         filterCriteria,
-        `fleet-report-${isNihalSelected ? 'nihal-' : ''}${startDate}-to-${endDate}.pdf`
+        `fleet-report-${driverFilePrefix}${startDate}-to-${endDate}.pdf`
       );
     }
   };
@@ -296,9 +266,9 @@ export default function AdminReportsPage() {
               <FileSpreadsheet className="w-6 h-6 text-purple-600" />
               <span>Fleet &amp; Driver Operations Reports</span>
             </h1>
-            {isNihalSelected && (
+            {activeSelectedDriver && (
               <Badge variant="purple" size="md">
-                👤 Driver Nihal Focused
+                👤 {activeSelectedDriver.full_name} Filtered
               </Badge>
             )}
           </div>
@@ -307,23 +277,8 @@ export default function AdminReportsPage() {
           </p>
         </div>
 
-        {/* QUICK ACTIONS & EXPORTS */}
+        {/* EXPORTS & SYNC */}
         <div className="flex flex-wrap items-center gap-2">
-          {nihalDriver && (
-            <button
-              onClick={() => handleToggleCheckNihal()}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs border ${
-                isNihalSelected
-                  ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400/40'
-                  : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-              }`}
-              title="Filter directly to Driver Nihal"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{isNihalSelected ? '✓ Nihal Selected' : '⚡ Check Nihal'}</span>
-            </button>
-          )}
-
           <Button
             variant="outline"
             size="sm"
@@ -423,28 +378,9 @@ export default function AdminReportsPage() {
             </span>
           </button>
         </div>
-
-        {/* Quick Driver Focus Links */}
-        {nihalDriver && (
-          <div className="flex items-center gap-1.5 pl-2">
-            <span className="text-xs text-slate-400 font-medium hidden sm:inline">Nihal Shortcuts:</span>
-            <button
-              onClick={() => handleToggleCheckNihal('hours')}
-              className="text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
-            >
-              ⏱️ Nihal Hours
-            </button>
-            <button
-              onClick={() => handleToggleCheckNihal('logins')}
-              className="text-xs px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium transition-colors"
-            >
-              🔐 Nihal Logins
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* 3. DEDICATED DRIVER SPOTLIGHT CARD (When Nihal or a driver is filtered) */}
+      {/* 3. DEDICATED DRIVER SPOTLIGHT CARD (When a driver is filtered) */}
       {activeSelectedDriver && (
         <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md border border-blue-800/50">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -587,17 +523,8 @@ export default function AdminReportsPage() {
 
           {/* Driver Filter */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase flex items-center justify-between">
-              <span>Driver</span>
-              {nihalDriver && (
-                <button
-                  type="button"
-                  onClick={() => handleToggleCheckNihal()}
-                  className="text-[10px] text-blue-600 hover:underline lowercase font-bold"
-                >
-                  {isNihalSelected ? 'view all' : 'select nihal'}
-                </button>
-              )}
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">
+              Driver
             </label>
             <select
               value={selectedDriverId}
@@ -1054,7 +981,9 @@ export default function AdminReportsPage() {
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-blue-600" />
               <span className="font-bold text-slate-800 text-sm sm:text-base">
-                {isNihalSelected ? "Nihal's Working Hours & Shift Logs" : 'Driver Working Hours & Shift Logs'}
+                {activeSelectedDriver
+                  ? `${activeSelectedDriver.full_name}'s Working Hours & Shift Logs`
+                  : 'Driver Working Hours & Shift Logs'}
               </span>
               <span className="text-xs text-slate-400 font-normal">({workingHoursItems.length})</span>
             </div>
@@ -1281,7 +1210,9 @@ export default function AdminReportsPage() {
               <div className="flex items-center gap-2">
                 <KeyRound className="w-4 h-4 text-indigo-600" />
                 <span className="font-bold text-slate-800 text-sm sm:text-base">
-                  {isNihalSelected ? "Nihal's Login Credentials & Account" : 'Driver Logins & Access Credentials'}
+                  {activeSelectedDriver
+                    ? `${activeSelectedDriver.full_name}'s Login Credentials & Account`
+                    : 'Driver Logins & Access Credentials'}
                 </span>
               </div>
             }
