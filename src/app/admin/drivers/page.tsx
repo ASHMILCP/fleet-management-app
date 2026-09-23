@@ -7,7 +7,6 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { DriverModal } from '@/components/admin/DriverModal';
-import { SyncDataModal } from '@/components/admin/SyncDataModal';
 import {
   Users,
   UserPlus,
@@ -21,7 +20,6 @@ import {
   Eye,
   EyeOff,
   RotateCcw,
-  Smartphone,
 } from 'lucide-react';
 
 export default function AdminDriversPage() {
@@ -29,7 +27,6 @@ export default function AdminDriversPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Profile | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
@@ -115,16 +112,7 @@ export default function AdminDriversPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="outline"
-            onClick={() => setIsSyncModalOpen(true)}
-            leftIcon={<Smartphone className="w-4 h-4 text-indigo-600" />}
-            className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-          >
-            Sync to Phone
-          </Button>
-
+        <div className="flex items-center gap-2.5">
           <Button
             variant="outline"
             onClick={handleClearDemoData}
@@ -326,12 +314,6 @@ export default function AdminDriversPage() {
         onClose={() => setIsModalOpen(false)}
         driver={editingDriver}
         onSave={loadData}
-      />
-
-      <SyncDataModal
-        isOpen={isSyncModalOpen}
-        onClose={() => setIsSyncModalOpen(false)}
-        onSyncComplete={loadData}
       />
     </div>
   );
