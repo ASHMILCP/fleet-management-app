@@ -20,14 +20,17 @@ import {
   X,
   Compass,
   Repeat,
+  KeyRound,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
+import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   useEffect(() => {
     setCurrentUser(FleetStore.getCurrentUser());
@@ -128,6 +131,18 @@ export const Navbar: React.FC = () => {
               </div>
             </div>
 
+            {/* ADMIN CREDENTIALS BUTTON */}
+            {isAdmin && (
+              <button
+                onClick={() => setIsAdminModalOpen(true)}
+                title="Admin Account & Credentials"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-slate-500" />
+                <span>Admin Account</span>
+              </button>
+            )}
+
             {/* LOGOUT */}
             <button
               onClick={handleLogout}
@@ -177,6 +192,18 @@ export const Navbar: React.FC = () => {
                 <span>{item.label}</span>
               </Link>
             ))}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setIsAdminModalOpen(true);
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <KeyRound className="w-4 h-4 text-slate-500" />
+                <span>Admin Account &amp; Password</span>
+              </button>
+            )}
           </div>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
@@ -190,6 +217,13 @@ export const Navbar: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ADMIN PROFILE MODAL */}
+      <AdminProfileModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onSaved={() => setCurrentUser(FleetStore.getCurrentUser())}
+      />
     </nav>
   );
 };

@@ -34,6 +34,7 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'fleet_current_user_v1',
   INITIALIZED: 'fleet_initialized_v1',
   DELETED_DRIVERS: 'fleet_deleted_drivers_v1',
+  ADMIN_PROFILE: 'fleet_admin_profile_v1',
 };
 
 // Safe LocalStorage helpers
@@ -106,6 +107,51 @@ export class FleetStore {
         document.cookie = `${name}=; path=/admin; expires=${pastDate}; max-age=0`;
       });
     }
+  }
+
+  // Admin Profile Management
+  static getAdminProfile(): Profile {
+    return getItem<Profile>(STORAGE_KEYS.ADMIN_PROFILE, INITIAL_ADMIN);
+  }
+
+  static updateAdminProfile(updates: Partial<Profile>): Profile {
+    const current = this.getAdminProfile();
+    const updated: Profile = {
+      ...current,
+      ...updates,
+      id: current.id || INITIAL_ADMIN.id,
+      role: 'ADMIN',
+      is_active: true,
+    };
+    setItem(STORAGE_KEYS.ADMIN_PROFILE, updated);
+
+    // If currently logged in as Admin, update current user
+    const currentUser = this.getCurrentUser();
+    if (currentUser && currentUser.role === 'ADMIN') {
+      this.setCurrentUser(updated);
+    }
+
+    // Sync to Supabase cloud if configured
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase
+        .from('profiles')
+        .upsert({
+          id: updated.id,
+          role: 'ADMIN',
+          username: updated.username,
+          password: updated.password,
+          name: updated.full_name,
+          full_name: updated.full_name,
+          phone: updated.phone || '9999999999',
+          status: 'ACTIVE',
+        })
+        .then(({ error }) => {
+          if (error) console.error('Supabase admin profile update error:', error);
+        });
+    }
+
+    return updated;
   }
 
   static clearAllDemoData(): void {
@@ -232,6 +278,23 @@ export class FleetStore {
       // 3. PROFILES / DRIVERS SYNC
       const localDrivers = this.getDrivers();
       if (Array.isArray(pRes.data)) {
+        // Sync cloud admin if present
+        const adminRow = pRes.data.find((row: any) => row.role === 'ADMIN' || row.id === INITIAL_ADMIN.id);
+        if (adminRow) {
+          const currentAdmin = this.getAdminProfile();
+          const syncedAdmin: Profile = {
+            id: adminRow.id || currentAdmin.id,
+            role: 'ADMIN',
+            full_name: adminRow.full_name || adminRow.name || currentAdmin.full_name,
+            phone: adminRow.phone || currentAdmin.phone || '9999999999',
+            username: adminRow.username || currentAdmin.username || 'admin',
+            password: adminRow.password || currentAdmin.password || 'admin123',
+            is_active: true,
+            created_at: adminRow.created_at || currentAdmin.created_at,
+          };
+          setItem(STORAGE_KEYS.ADMIN_PROFILE, syncedAdmin);
+        }
+
         const seenUsernames = new Set<string>();
         const seenIds = new Set<string>();
         const cloudProfiles: Profile[] = [];
@@ -790,9 +853,11 @@ export class FleetStore {
     const query = usernameOrEmail.trim().toLowerCase();
     const pass = passwordInput.trim();
 
-    const admin = INITIAL_ADMIN;
-    const adminUserMatch = admin.username?.toLowerCase() === query || query === 'admin' || query.includes('admin');
-    const adminPassMatch = admin.password === pass || pass === 'admin123';
+    const admin = this.getAdminProfile();
+    const adminUserMatch =
+      admin.username?.toLowerCase() === query ||
+      (query === 'admin' && admin.username?.toLowerCase() === 'admin');
+    const adminPassMatch = admin.password === pass;
     if (adminUserMatch && adminPassMatch && admin.is_active) {
       return admin;
     }
@@ -811,9 +876,11 @@ export class FleetStore {
     const query = usernameOrEmail.trim().toLowerCase();
     const pass = passwordInput.trim();
 
-    const admin = INITIAL_ADMIN;
-    const adminUserMatch = admin.username?.toLowerCase() === query || query === 'admin' || query.includes('admin');
-    const adminPassMatch = admin.password === pass || pass === 'admin123';
+    const admin = this.getAdminProfile();
+    const adminUserMatch =
+      admin.username?.toLowerCase() === query ||
+      (query === 'admin' && admin.username?.toLowerCase() === 'admin');
+    const adminPassMatch = admin.password === pass;
     if (adminUserMatch && adminPassMatch && admin.is_active) {
       return admin;
     }
@@ -823,6 +890,29 @@ export class FleetStore {
         const supabase = createClient();
         const { data: profiles, error } = await supabase.from('profiles').select('*');
         if (!error && Array.isArray(profiles)) {
+          // Check for cloud admin
+          const cloudAdmin = profiles.find((p: any) => p.role === 'ADMIN' || p.id === INITIAL_ADMIN.id);
+          if (cloudAdmin) {
+            const aUserMatch = (cloudAdmin.username && cloudAdmin.username.toLowerCase() === query) ||
+                               (cloudAdmin.name && cloudAdmin.name.toLowerCase() === query) ||
+                               (cloudAdmin.full_name && cloudAdmin.full_name.toLowerCase() === query);
+            const aPassMatch = cloudAdmin.password ? cloudAdmin.password === pass : pass === 'admin123';
+            if (aUserMatch && aPassMatch) {
+              const syncedAdmin: Profile = {
+                id: cloudAdmin.id || INITIAL_ADMIN.id,
+                role: 'ADMIN',
+                full_name: cloudAdmin.name || cloudAdmin.full_name || admin.full_name,
+                username: cloudAdmin.username || admin.username || 'admin',
+                password: cloudAdmin.password || admin.password || 'admin123',
+                phone: cloudAdmin.phone || admin.phone || '9999999999',
+                is_active: true,
+                created_at: cloudAdmin.created_at || admin.created_at,
+              };
+              setItem(STORAGE_KEYS.ADMIN_PROFILE, syncedAdmin);
+              return syncedAdmin;
+            }
+          }
+
           const matched = profiles.find((d: any) => {
             const isActive = d.status ? d.status === 'ACTIVE' : (d.is_active !== undefined ? d.is_active : true);
             if (!isActive) return false;
@@ -1120,6 +1210,11 @@ export class FleetStore {
         assignedFuelDates.add(dateKey);
       }
 
+      const ratePerKm = Number(company?.billing_rate_per_km || 0);
+      const totalKm = Number(t.total_km || 0);
+      const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
+      const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+
       return {
         id: t.id,
         trip_date: t.trip_date,
@@ -1127,11 +1222,14 @@ export class FleetStore {
         driver_phone: driver?.phone,
         vehicle_reg: vehicle?.registration_number,
         company_name: company?.name || 'Unknown Company',
+        billing_rate_per_km: ratePerKm,
         trip_type: t.trip_type,
         one_side_km: Number(t.one_side_km),
         multiplier: t.multiplier,
-        total_km: Number(t.total_km),
+        total_km: totalKm,
+        earnings: earnings,
         fuel_amount: fuelOnDate,
+        net_profit: netProfit,
         created_at: t.created_at,
         notes: t.notes,
       };
@@ -1174,11 +1272,14 @@ export class FleetStore {
           driver_phone: driver?.phone,
           vehicle_reg: vehicle?.registration_number,
           company_name: 'Fuel Log (Direct)',
+          billing_rate_per_km: 0,
           trip_type: 'ONE_SIDE',
           one_side_km: 0,
           multiplier: 1,
           total_km: 0,
+          earnings: 0,
           fuel_amount: entry.amount,
+          net_profit: -entry.amount,
           created_at: entry.log_date + 'T12:00:00.000Z',
           notes: entry.notes || 'Fuel Purchase',
         });

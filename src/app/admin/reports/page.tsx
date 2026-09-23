@@ -82,6 +82,10 @@ export default function AdminReportsPage() {
     () => reportItems.reduce((sum, item) => sum + item.total_km, 0),
     [reportItems]
   );
+  const totalEarnings = useMemo(
+    () => reportItems.reduce((sum, item) => sum + (item.earnings || 0), 0),
+    [reportItems]
+  );
   const totalFuel = useMemo(() => {
     const fuelLogs = FleetStore.getFuelLogs();
     return fuelLogs
@@ -95,6 +99,7 @@ export default function AdminReportsPage() {
   }, [startDate, endDate, selectedDriverId, reportItems]);
 
   const avgCostPerKm = totalKm > 0 ? parseFloat((totalFuel / totalKm).toFixed(2)) : 0;
+  const netProfit = totalEarnings - totalFuel;
 
   // Quick Preset Handlers
   const handleSetToday = () => {
@@ -286,7 +291,7 @@ export default function AdminReportsPage() {
       </Card>
 
       {/* 3. AGGREGATED METRICS STRIP */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
           <div className="text-xs font-bold text-slate-500 uppercase">Filtered Trips</div>
           <div className="text-2xl font-black text-slate-900 font-mono mt-1">
@@ -303,20 +308,35 @@ export default function AdminReportsPage() {
           <div className="text-[11px] text-slate-400 mt-1">Sum of total_km</div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="text-xs font-bold text-amber-600 uppercase">Total Fuel Logged</div>
+        <div className="bg-white p-4 rounded-2xl border border-emerald-200 shadow-xs bg-emerald-50/30">
+          <div className="text-xs font-bold text-emerald-700 uppercase flex items-center gap-1">
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Gross Earnings</span>
+          </div>
+          <div className="text-2xl font-black text-emerald-950 font-mono mt-1">
+            {formatCurrencyINR(totalEarnings)}
+          </div>
+          <div className="text-[11px] text-emerald-600 mt-1">KM &times; Company Rate</div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-amber-200 shadow-xs">
+          <div className="text-xs font-bold text-amber-600 uppercase">Fuel Logged</div>
           <div className="text-2xl font-black text-amber-950 font-mono mt-1">
             {formatCurrencyINR(totalFuel)}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">Fuel expenditure</div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-purple-200 shadow-xs bg-purple-50/40">
-          <div className="text-xs font-bold text-purple-700 uppercase">Fleet Fuel Cost / KM</div>
-          <div className="text-2xl font-black text-purple-950 font-mono mt-1">
-            ₹{avgCostPerKm.toFixed(2)} <span className="text-sm">/KM</span>
+        <div className={`bg-white p-4 rounded-2xl border shadow-xs ${
+          netProfit >= 0 ? 'border-indigo-200 bg-indigo-50/30' : 'border-rose-200 bg-rose-50/30'
+        }`}>
+          <div className={`text-xs font-bold uppercase ${netProfit >= 0 ? 'text-indigo-700' : 'text-rose-700'}`}>
+            Net Margin / Profit
           </div>
-          <div className="text-[11px] text-purple-600 mt-1">Total Fuel ÷ Total KM</div>
+          <div className={`text-2xl font-black font-mono mt-1 ${netProfit >= 0 ? 'text-indigo-950' : 'text-rose-950'}`}>
+            {formatCurrencyINR(netProfit)}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">Earnings - Fuel Expense</div>
         </div>
       </div>
 
@@ -343,7 +363,10 @@ export default function AdminReportsPage() {
                   <th className="py-3.5 px-4 text-right">1-Way KM</th>
                   <th className="py-3.5 px-4 text-center">Multi</th>
                   <th className="py-3.5 px-4 text-right">Total KM</th>
+                  <th className="py-3.5 px-4 text-right">Rate/KM</th>
+                  <th className="py-3.5 px-4 text-right">Earnings</th>
                   <th className="py-3.5 px-4 text-right">Fuel (₹)</th>
+                  <th className="py-3.5 px-4 text-right">Net Profit</th>
                   <th className="py-3.5 px-4">Notes</th>
                 </tr>
               </thead>
@@ -390,8 +413,24 @@ export default function AdminReportsPage() {
                       {item.total_km} km
                     </td>
 
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-600">
+                      {item.billing_rate_per_km > 0 ? `₹${item.billing_rate_per_km}` : '-'}
+                    </td>
+
+                    <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-700">
+                      {item.earnings > 0 ? formatCurrencyINR(item.earnings) : '-'}
+                    </td>
+
                     <td className="py-3.5 px-4 text-right font-mono font-semibold text-amber-700">
                       {item.fuel_amount > 0 ? formatCurrencyINR(item.fuel_amount) : '-'}
+                    </td>
+
+                    <td className={`py-3.5 px-4 text-right font-mono font-bold ${
+                      (item.net_profit ?? (item.earnings - item.fuel_amount)) >= 0
+                        ? 'text-emerald-800'
+                        : 'text-rose-600'
+                    }`}>
+                      {formatCurrencyINR(item.net_profit ?? (item.earnings - item.fuel_amount))}
                     </td>
 
                     <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
@@ -404,13 +443,24 @@ export default function AdminReportsPage() {
                 <tr>
                   <td className="py-3.5 px-4 uppercase text-xs">Total Summary</td>
                   <td colSpan={6} className="py-3.5 px-4 text-xs text-slate-500">
-                    {reportItems.length} trips &bull; Avg Cost: ₹{avgCostPerKm.toFixed(2)}/KM
+                    {reportItems.length} records &bull; Avg Fuel Cost: ₹{avgCostPerKm.toFixed(2)}/KM
                   </td>
-                  <td className="py-3.5 px-4 text-right font-mono text-base font-black">
+                  <td className="py-3.5 px-4 text-right font-mono text-sm font-black">
                     {totalKm.toFixed(1)} km
                   </td>
-                  <td className="py-3.5 px-4 text-right font-mono text-base font-black text-amber-700">
+                  <td className="py-3.5 px-4 text-right font-mono text-xs text-slate-400">
+                    -
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-mono text-sm font-black text-emerald-700">
+                    {formatCurrencyINR(totalEarnings)}
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-mono text-sm font-black text-amber-700">
                     {formatCurrencyINR(totalFuel)}
+                  </td>
+                  <td className={`py-3.5 px-4 text-right font-mono text-sm font-black ${
+                    netProfit >= 0 ? 'text-emerald-800' : 'text-rose-600'
+                  }`}>
+                    {formatCurrencyINR(netProfit)}
                   </td>
                   <td></td>
                 </tr>

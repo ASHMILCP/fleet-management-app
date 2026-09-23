@@ -128,7 +128,10 @@ export interface DetailedReportItem {
   one_side_km: number;
   multiplier: number;
   total_km: number;
+  billing_rate_per_km: number;
+  earnings: number;
   fuel_amount: number;
+  net_profit?: number;
   created_at: string;
   notes?: string;
 }

@@ -26,7 +26,9 @@ import {
   AlertCircle,
   RotateCcw,
   RefreshCw,
+  KeyRound,
 } from 'lucide-react';
+import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
 
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState<AdminSummaryMetrics>({
@@ -42,6 +44,7 @@ export default function AdminDashboard() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   const loadDashboardData = async () => {
     setIsRefreshing(true);
@@ -112,6 +115,15 @@ export default function AdminDashboard() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => setIsAdminModalOpen(true)}
+            leftIcon={<KeyRound className="w-4 h-4 text-purple-600" />}
+          >
+            Admin Account
+          </Button>
+
           <Button
             variant="outline"
             size="md"
@@ -370,6 +382,12 @@ export default function AdminDashboard() {
           </Card>
         </div>
       </div>
+      {/* ADMIN PROFILE MODAL */}
+      <AdminProfileModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onSaved={loadDashboardData}
+      />
     </div>
   );
 }

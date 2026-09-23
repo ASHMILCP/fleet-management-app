@@ -32,11 +32,11 @@ export default function LoginPage() {
     }
 
     // 1. Instant check for Admin account
-    const admin = INITIAL_ADMIN;
+    const admin = FleetStore.getAdminProfile();
     const adminUserMatch =
       admin.username?.toLowerCase() === inputUser.toLowerCase() ||
-      inputUser.toLowerCase() === 'admin';
-    const adminPassMatch = admin.password === inputPass || inputPass === 'admin123';
+      (inputUser.toLowerCase() === 'admin' && admin.username?.toLowerCase() === 'admin');
+    const adminPassMatch = admin.password === inputPass;
     if (adminUserMatch && adminPassMatch) {
       FleetStore.setCurrentUser(admin);
       router.push('/admin');

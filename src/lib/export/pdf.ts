@@ -21,7 +21,9 @@ export function exportToPDF(
 
   // Calculate aggregates
   const totalKm = items.reduce((sum, item) => sum + item.total_km, 0);
+  const totalEarnings = items.reduce((sum, item) => sum + (item.earnings || 0), 0);
   const totalFuel = items.reduce((sum, item) => sum + item.fuel_amount, 0);
+  const totalNet = totalEarnings - totalFuel;
   const costPerKm = totalKm > 0 ? (totalFuel / totalKm).toFixed(2) : '0.00';
 
   // Title Header
@@ -42,26 +44,35 @@ export function exportToPDF(
   doc.setFillColor(248, 250, 252);
   doc.roundedRect(40, 70, 762, 45, 4, 4, 'FD');
 
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setTextColor(15, 23, 42); // Slate 900
-  doc.text(`Total Records: ${items.length}`, 60, 97);
-  doc.text(`Total Distance: ${totalKm.toFixed(1)} KM`, 210, 97);
-  doc.text(`Total Fuel Expense: ₹${totalFuel.toFixed(2)}`, 390, 97);
-  doc.text(`Fleet Avg Cost/KM: ₹${costPerKm}/KM`, 590, 97);
+  doc.text(`Total Records: ${items.length}`, 50, 97);
+  doc.text(`Distance: ${totalKm.toFixed(1)} KM`, 170, 97);
+  doc.text(`Gross Earnings: ₹${totalEarnings.toFixed(2)}`, 310, 97);
+  doc.text(`Fuel: ₹${totalFuel.toFixed(2)}`, 480, 97);
+  doc.text(`Net Profit: ₹${totalNet.toFixed(2)}`, 610, 97);
 
   // Prepare table data
-  const tableData = items.map((item) => [
-    item.trip_date,
-    item.driver_name,
-    item.vehicle_reg || 'N/A',
-    item.company_name,
-    item.trip_type,
-    `${item.one_side_km} km`,
-    `x${item.multiplier}`,
-    `${item.total_km} km`,
-    `₹${item.fuel_amount}`,
-    item.notes || '-',
-  ]);
+  const tableData = items.map((item) => {
+    const rate = item.billing_rate_per_km || 0;
+    const earnings = item.earnings || 0;
+    const net = item.net_profit ?? (earnings - item.fuel_amount);
+    return [
+      item.trip_date,
+      item.driver_name,
+      item.vehicle_reg || 'N/A',
+      item.company_name,
+      item.trip_type,
+      `${item.one_side_km} km`,
+      `x${item.multiplier}`,
+      `${item.total_km} km`,
+      rate > 0 ? `₹${rate}` : '-',
+      `₹${earnings.toFixed(2)}`,
+      `₹${item.fuel_amount.toFixed(2)}`,
+      `₹${net.toFixed(2)}`,
+      item.notes || '-',
+    ];
+  });
 
   // Append Total Row
   tableData.push([
@@ -73,7 +84,10 @@ export function exportToPDF(
     '',
     '',
     `${totalKm.toFixed(1)} km`,
+    '',
+    `₹${totalEarnings.toFixed(2)}`,
     `₹${totalFuel.toFixed(2)}`,
+    `₹${totalNet.toFixed(2)}`,
     `Avg: ₹${costPerKm}/KM`,
   ]);
 
@@ -89,7 +103,10 @@ export function exportToPDF(
         '1-Side KM',
         'Multi',
         'Total KM',
+        'Rate/KM',
+        'Gross (₹)',
         'Fuel (₹)',
+        'Net (₹)',
         'Notes',
       ],
     ],

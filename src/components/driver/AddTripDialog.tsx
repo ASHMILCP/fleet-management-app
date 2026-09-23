@@ -118,7 +118,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
               ) : (
                 companies.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} {c.billing_rate_per_km ? `(₹${c.billing_rate_per_km}/km)` : ''}
+                    {c.name}
                   </option>
                 ))
               )}
