@@ -24,7 +24,6 @@ import {
   ShieldCheck,
   Calendar,
   AlertCircle,
-  RotateCcw,
   RefreshCw,
   KeyRound,
 } from 'lucide-react';
@@ -80,18 +79,6 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  const handleClearDemoData = () => {
-    if (
-      confirm(
-        '⚠️ Are you sure you want to CLEAR ALL DEMO DATA?\n\nThis will remove all demo drivers, vehicles, companies, duty sessions, trips, and fuel logs so you can start 100% fresh.\n\nYour admin login will remain intact.'
-      )
-    ) {
-      FleetStore.clearAllDemoData();
-      loadDashboardData();
-      alert('All demo data cleared! Your fleet system is now empty and ready for fresh entries.');
-    }
-  };
-
   const driverMap = new Map(drivers.map((d) => [d.id, d]));
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
 
@@ -137,16 +124,6 @@ export default function AdminDashboard() {
             leftIcon={<RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />}
           >
             {isRefreshing ? 'Syncing...' : 'Refresh Data'}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleClearDemoData}
-            leftIcon={<RotateCcw className="w-4 h-4 text-rose-600" />}
-            className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          >
-            Clear Demo Data
           </Button>
         </div>
       </div>

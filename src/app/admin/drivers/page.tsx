@@ -19,7 +19,6 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  RotateCcw,
 } from 'lucide-react';
 
 export default function AdminDriversPage() {
@@ -65,17 +64,6 @@ export default function AdminDriversPage() {
     }
   };
 
-  const handleClearDemoData = () => {
-    if (
-      confirm(
-        '⚠️ Are you sure you want to CLEAR ALL DEMO DATA?\n\nThis will remove all demo drivers, vehicles, companies, duty sessions, trips, and fuel logs so you can start 100% fresh.\n\nYour admin login will remain intact.'
-      )
-    ) {
-      FleetStore.clearAllDemoData();
-      loadData();
-      alert('All demo data has been cleared! Your fleet system is now empty and ready for fresh entries.');
-    }
-  };
 
   const togglePasswordVisibility = (driverId: string) => {
     setVisiblePasswords((prev) => ({
@@ -116,16 +104,6 @@ export default function AdminDriversPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleClearDemoData}
-            leftIcon={<RotateCcw className="w-4 h-4 text-rose-600" />}
-            className="border-rose-200 text-rose-700 hover:bg-rose-50"
-          >
-            Clear Demo Data
-          </Button>
-
           <Button
             variant="primary"
             size="sm"
