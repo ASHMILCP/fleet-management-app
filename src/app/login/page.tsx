@@ -33,6 +33,21 @@ export default function LoginPage() {
       return;
     }
 
+    const getDeviceInfo = () => {
+      if (typeof navigator === 'undefined') return 'Web Browser';
+      const ua = navigator.userAgent;
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+      const isPwa = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+      let os = 'Device';
+      if (/iPhone|iPad|iPod/i.test(ua)) os = 'Apple iOS';
+      else if (/Android/i.test(ua)) os = 'Android';
+      else if (/Mac/i.test(ua)) os = 'Mac Desktop';
+      else if (/Windows/i.test(ua)) os = 'Windows PC';
+      else if (/Linux/i.test(ua)) os = 'Linux';
+
+      return `${os} ${isMobile ? 'Mobile' : ''} ${isPwa ? '• Installed PWA' : '• Browser'}`.trim();
+    };
+
     // 1. Instant check for Admin account
     const admin = FleetStore.getAdminProfile();
     const adminUserMatch =
@@ -41,6 +56,7 @@ export default function LoginPage() {
     const adminPassMatch = admin.password === inputPass;
     if (adminUserMatch && adminPassMatch) {
       FleetStore.setCurrentUser(admin);
+      FleetStore.recordLoginAuditAsync(admin, { device: getDeviceInfo() });
       router.push('/admin');
       setIsLoading(false);
       return;
@@ -50,6 +66,7 @@ export default function LoginPage() {
     const dbUser = await FleetStore.authenticateUserAsync(inputUser, inputPass);
     if (dbUser) {
       FleetStore.setCurrentUser(dbUser);
+      FleetStore.recordLoginAuditAsync(dbUser, { device: getDeviceInfo() });
       router.push(dbUser.role === 'ADMIN' ? '/admin' : '/driver');
       setIsLoading(false);
       return;
@@ -110,6 +127,7 @@ export default function LoginPage() {
             };
 
             FleetStore.setCurrentUser(userProfile);
+            FleetStore.recordLoginAuditAsync(userProfile, { device: getDeviceInfo() });
             router.push(userProfile.role === 'ADMIN' ? '/admin' : '/driver');
             setIsLoading(false);
             return;

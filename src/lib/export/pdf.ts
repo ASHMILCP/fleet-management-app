@@ -1,6 +1,8 @@
-import { DetailedReportItem, ReportFilterCriteria } from '@/types';
+import { DetailedReportItem, DutySessionReportItem, LoginAuditItem, ReportFilterCriteria } from '@/types';
+import { formatDateTimeIST } from '@/lib/timezone';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
 
 export function exportToPDF(
   items: DetailedReportItem[],
@@ -141,3 +143,188 @@ export function exportToPDF(
 
   doc.save(filename);
 }
+
+export function exportWorkingHoursToPDF(
+  items: DutySessionReportItem[],
+  filters?: ReportFilterCriteria,
+  filename: string = 'working-hours-report.pdf'
+) {
+  if (!items || items.length === 0) {
+    alert('No data available to export');
+    return;
+  }
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'pt',
+    format: 'a4',
+  });
+
+  const totalMins = items.reduce((sum, item) => sum + item.total_minutes, 0);
+  const totalHours = Math.floor(totalMins / 60);
+  const remainingMins = totalMins % 60;
+  const totalTrips = items.reduce((sum, item) => sum + item.trips_count, 0);
+  const totalKm = items.reduce((sum, item) => sum + (item.total_km || 0), 0);
+
+  // Title Header
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59);
+  doc.text('FLEET MANAGEMENT - DRIVER WORKING HOURS REPORT', 40, 40);
+
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  const dateRangeStr = filters
+    ? `Date Range: ${filters.startDate} to ${filters.endDate} | Timezone: Asia/Kolkata (IST)`
+    : 'Timezone: Asia/Kolkata (IST)';
+  doc.text(dateRangeStr, 40, 58);
+
+  // Metrics Box
+  doc.setDrawColor(226, 232, 240);
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(40, 70, 762, 45, 4, 4, 'FD');
+
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Total Shifts: ${items.length}`, 50, 97);
+  doc.text(`Total Working Time: ${totalHours}h ${remainingMins.toString().padStart(2, '0')}m`, 190, 97);
+  doc.text(`Trips Handled: ${totalTrips}`, 400, 97);
+  doc.text(`Distance Logged: ${totalKm.toFixed(1)} KM`, 560, 97);
+
+  const tableData = items.map((item) => [
+    item.session_date,
+    item.driver_name + (item.driver_username ? ` (@${item.driver_username})` : ''),
+    item.vehicle_reg || 'Unassigned',
+    formatDateTimeIST(item.start_time),
+    item.end_time ? formatDateTimeIST(item.end_time) : 'Active / On Duty',
+    item.formatted_duration,
+    item.trips_count.toString(),
+    `${(item.total_km || 0).toFixed(1)} km`,
+    item.status,
+    item.notes || '-',
+  ]);
+
+  tableData.push([
+    'TOTAL',
+    '',
+    '',
+    '',
+    '',
+    `${totalHours}h ${remainingMins.toString().padStart(2, '0')}m`,
+    totalTrips.toString(),
+    `${totalKm.toFixed(1)} km`,
+    `${items.length} Shifts`,
+    '',
+  ]);
+
+  autoTable(doc, {
+    startY: 125,
+    head: [
+      [
+        'Shift Date',
+        'Driver',
+        'Vehicle Plate',
+        'Shift Start (IST)',
+        'Shift End (IST)',
+        'Duration',
+        'Trips',
+        'Total KM',
+        'Status',
+        'Notes',
+      ],
+    ],
+    body: tableData,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [147, 51, 234], // Purple 600
+      textColor: 255,
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      textColor: [51, 65, 85],
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    margin: { left: 40, right: 40 },
+    didParseCell: function (data) {
+      if (data.row.index === tableData.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [226, 232, 240];
+      }
+    },
+  });
+
+  doc.save(filename);
+}
+
+export function exportLoginDetailsToPDF(
+  items: LoginAuditItem[],
+  filters?: ReportFilterCriteria,
+  filename: string = 'login-details-report.pdf'
+) {
+  if (!items || items.length === 0) {
+    alert('No data available to export');
+    return;
+  }
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'pt',
+    format: 'a4',
+  });
+
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59);
+  doc.text('FLEET MANAGEMENT - LOGIN & AUDIT REPORT', 40, 40);
+
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  const dateRangeStr = filters
+    ? `Date Range: ${filters.startDate} to ${filters.endDate} | Timezone: Asia/Kolkata (IST)`
+    : 'Timezone: Asia/Kolkata (IST)';
+  doc.text(dateRangeStr, 40, 58);
+
+  const tableData = items.map((item) => [
+    formatDateTimeIST(item.login_time),
+    item.full_name,
+    `@${item.username}`,
+    item.role,
+    item.device_info,
+    item.status,
+  ]);
+
+  autoTable(doc, {
+    startY: 80,
+    head: [
+      [
+        'Login Timestamp (IST)',
+        'Full Name',
+        'Username',
+        'Role',
+        'Device & Platform',
+        'Status',
+      ],
+    ],
+    body: tableData,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [59, 130, 246], // Blue 500
+      textColor: 255,
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      textColor: [51, 65, 85],
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
+    margin: { left: 40, right: 40 },
+  });
+
+  doc.save(filename);
+}
+

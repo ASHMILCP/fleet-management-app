@@ -1,4 +1,5 @@
-import { DetailedReportItem } from '@/types';
+import { DetailedReportItem, DutySessionReportItem, LoginAuditItem } from '@/types';
+import { formatDateTimeIST } from '@/lib/timezone';
 import * as XLSX from 'xlsx';
 
 export function exportToExcel(items: DetailedReportItem[], filename: string = 'fleet-report.xlsx') {
@@ -78,3 +79,86 @@ export function exportToExcel(items: DetailedReportItem[], filename: string = 'f
 
   XLSX.writeFile(workbook, filename);
 }
+
+export function exportWorkingHoursToExcel(
+  items: DutySessionReportItem[],
+  filename: string = 'working-hours-report.xlsx'
+) {
+  if (!items || items.length === 0) {
+    alert('No data available to export');
+    return;
+  }
+
+  const dataRows = items.map((item) => ({
+    'Shift Date': item.session_date,
+    'Driver Name': item.driver_name,
+    'Driver Username': item.driver_username ? `@${item.driver_username}` : '',
+    'Phone': item.driver_phone || '',
+    'Vehicle Plate': item.vehicle_reg || 'Unassigned',
+    'Vehicle Model': item.vehicle_model || '',
+    'Shift Start (IST)': formatDateTimeIST(item.start_time),
+    'Shift End (IST)': item.end_time ? formatDateTimeIST(item.end_time) : 'Active / On Duty',
+    'Working Duration': item.formatted_duration,
+    'Total Minutes': item.total_minutes,
+    'Trips Completed': item.trips_count,
+    'Distance Covered (KM)': item.total_km || 0,
+    'Status': item.status,
+    'Notes': item.notes || '',
+  }));
+
+  // Summary Row
+  const totalMins = items.reduce((sum, item) => sum + item.total_minutes, 0);
+  const totalHours = Math.floor(totalMins / 60);
+  const totalRemainingMins = totalMins % 60;
+  const totalKm = items.reduce((sum, item) => sum + (item.total_km || 0), 0);
+  const totalTrips = items.reduce((sum, item) => sum + item.trips_count, 0);
+
+  dataRows.push({
+    'Shift Date': 'TOTAL',
+    'Driver Name': '',
+    'Driver Username': '',
+    'Phone': '',
+    'Vehicle Plate': '',
+    'Vehicle Model': '',
+    'Shift Start (IST)': '',
+    'Shift End (IST)': '',
+    'Working Duration': `${totalHours}h ${totalRemainingMins.toString().padStart(2, '0')}m`,
+    'Total Minutes': totalMins as any,
+    'Trips Completed': totalTrips as any,
+    'Distance Covered (KM)': totalKm as any,
+    'Status': '' as any,
+    'Notes': `Total Shifts: ${items.length}`,
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(dataRows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Working Hours');
+  XLSX.writeFile(workbook, filename);
+}
+
+export function exportLoginDetailsToExcel(
+  items: LoginAuditItem[],
+  filename: string = 'login-details-report.xlsx'
+) {
+  if (!items || items.length === 0) {
+    alert('No data available to export');
+    return;
+  }
+
+  const dataRows = items.map((item) => ({
+    'Login Date & Time (IST)': formatDateTimeIST(item.login_time),
+    'Full Name': item.full_name,
+    'Username': `@${item.username}`,
+    'Role': item.role,
+    'Phone': item.phone || '',
+    'Device & Platform': item.device_info,
+    'IP / Session Ref': item.ip_address || '',
+    'Status': item.status,
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(dataRows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Login Details');
+  XLSX.writeFile(workbook, filename);
+}
+

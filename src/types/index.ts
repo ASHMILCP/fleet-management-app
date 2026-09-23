@@ -135,3 +135,37 @@ export interface DetailedReportItem {
   created_at: string;
   notes?: string;
 }
+
+export interface DutySessionReportItem {
+  id: string;
+  driver_id: string;
+  driver_name: string;
+  driver_username?: string;
+  driver_phone?: string;
+  session_date: string;
+  start_time: string;
+  end_time?: string | null;
+  total_minutes: number;
+  formatted_duration: string;
+  vehicle_reg?: string;
+  vehicle_model?: string;
+  status: DutyStatus;
+  trips_count: number;
+  total_km?: number;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface LoginAuditItem {
+  id: string;
+  user_id: string;
+  username: string;
+  full_name: string;
+  role: UserRole;
+  login_time: string;
+  device_info: string;
+  status: 'SUCCESS' | 'FAILED';
+  ip_address?: string;
+  phone?: string;
+}
+

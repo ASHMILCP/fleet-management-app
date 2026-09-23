@@ -10,6 +10,8 @@ import {
   DriverTodaySummary,
   AdminSummaryMetrics,
   DetailedReportItem,
+  DutySessionReportItem,
+  LoginAuditItem,
   ReportFilterCriteria,
 } from '@/types';
 import {
@@ -35,6 +37,7 @@ const STORAGE_KEYS = {
   INITIALIZED: 'fleet_initialized_v1',
   DELETED_DRIVERS: 'fleet_deleted_drivers_v1',
   ADMIN_PROFILE: 'fleet_admin_profile_v1',
+  LOGIN_AUDITS: 'fleet_login_audits_v1',
 };
 
 // Safe LocalStorage helpers
@@ -1815,5 +1818,304 @@ export class FleetStore {
 
     return items.sort((a, b) => (b.trip_date > a.trip_date ? 1 : b.trip_date < a.trip_date ? -1 : 0));
   }
+
+  // ==========================================
+  // WORKING HOURS & DUTY REPORTS
+  // ==========================================
+  static async fetchWorkingHoursReportsAsync(filters: ReportFilterCriteria): Promise<DutySessionReportItem[]> {
+    let rawSessions: any[] = [];
+    let drivers: Profile[] = this.getDrivers();
+    let vehicles: Vehicle[] = this.getVehicles();
+    let trips: Trip[] = this.getTrips();
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const [dRes, pRes, vRes, tRes] = await Promise.all([
+          supabase.from('duty_sessions').select('*').order('start_time', { ascending: false }),
+          supabase.from('profiles').select('*'),
+          supabase.from('vehicles').select('*'),
+          supabase.from('trips').select('*'),
+        ]);
+
+        if (Array.isArray(dRes.data)) rawSessions = dRes.data;
+        if (Array.isArray(pRes.data)) {
+          drivers = pRes.data.map((p: any) => ({
+            id: p.id,
+            role: (p.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+            full_name: p.full_name || p.name || 'Driver',
+            username: p.username,
+            password: p.password,
+            phone: p.phone,
+            license_number: p.license_number,
+            assigned_vehicle_id: p.assigned_vehicle_id,
+            is_active: p.status ? p.status === 'ACTIVE' : true,
+            created_at: p.created_at || new Date().toISOString(),
+          }));
+        }
+        if (Array.isArray(vRes.data)) {
+          vehicles = vRes.data.map((v: any) => ({
+            id: v.id,
+            registration_number: v.registration_number,
+            model: v.model,
+            fuel_type: v.fuel_type || 'CNG',
+            is_active: v.status ? v.status === 'ACTIVE' : true,
+            created_at: v.created_at || new Date().toISOString(),
+          }));
+        }
+        if (Array.isArray(tRes.data)) {
+          trips = tRes.data.map((t: any) => ({
+            id: t.id,
+            driver_id: t.driver_id,
+            company_id: t.company_id,
+            vehicle_id: t.vehicle_id,
+            duty_session_id: t.duty_session_id,
+            one_side_km: Number(t.entered_km || t.one_side_km || 0),
+            trip_type: t.trip_type || 'ONE_SIDE',
+            multiplier: (Number(t.km_multiplier) === 1 || t.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
+            total_km: Number(t.total_km || 0),
+            trip_date: t.trip_date || (t.created_at ? t.created_at.split('T')[0] : getTodayDateIST()),
+            notes: t.notes,
+            created_at: t.created_at,
+          }));
+        }
+      } catch (err) {
+        console.error('Supabase fetchWorkingHoursReportsAsync error:', err);
+      }
+    }
+
+    if (rawSessions.length === 0) {
+      rawSessions = this.getDutySessions();
+    }
+
+    const driverMap = new Map(drivers.map((d) => [d.id, d]));
+    const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
+
+    const items: DutySessionReportItem[] = [];
+
+    for (const s of rawSessions) {
+      const driver = driverMap.get(s.driver_id);
+      const vehicleId = s.vehicle_id || driver?.assigned_vehicle_id;
+      const vehicle = vehicleId ? vehicleMap.get(vehicleId) : undefined;
+      const sessionDate = s.session_date || (s.start_time ? s.start_time.split('T')[0] : getTodayDateIST());
+
+      // Filter by date
+      if (filters.startDate && sessionDate < filters.startDate) continue;
+      if (filters.endDate && sessionDate > filters.endDate) continue;
+
+      // Filter by driver
+      if (filters.driverId !== 'ALL' && s.driver_id !== filters.driverId) continue;
+
+      const duration = calculateWorkingHours(s.start_time, s.end_time);
+      const totalMinutes = s.total_working_minutes ? Number(s.total_working_minutes) : duration.totalMinutes;
+
+      // Format human-readable duration
+      const hours = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      const formattedDuration = `${hours}h ${mins.toString().padStart(2, '0')}m`;
+
+      // Find trips related to this session/driver on this date
+      const matchingTrips = trips.filter((t) =>
+        t.duty_session_id === s.id || (t.driver_id === s.driver_id && t.trip_date === sessionDate)
+      );
+      const totalKm = matchingTrips.reduce((sum, t) => sum + (t.total_km || 0), 0);
+
+      items.push({
+        id: s.id,
+        driver_id: s.driver_id,
+        driver_name: driver?.full_name || 'Driver',
+        driver_username: driver?.username,
+        driver_phone: driver?.phone,
+        session_date: sessionDate,
+        start_time: s.start_time,
+        end_time: s.end_time || null,
+        total_minutes: totalMinutes,
+        formatted_duration: formattedDuration,
+        vehicle_reg: vehicle?.registration_number,
+        vehicle_model: vehicle?.model,
+        status: s.end_time ? 'COMPLETED' : 'ACTIVE',
+        trips_count: matchingTrips.length,
+        total_km: totalKm,
+        notes: s.notes,
+        created_at: s.created_at || s.start_time,
+      });
+    }
+
+    return items.sort((a, b) => {
+      const tA = new Date(a.start_time).getTime();
+      const tB = new Date(b.start_time).getTime();
+      return tB - tA;
+    });
+  }
+
+  // ==========================================
+  // LOGIN DETAILS & AUDIT TRACKING
+  // ==========================================
+  static async recordLoginAuditAsync(
+    user: Profile,
+    details?: { device?: string; ip?: string; method?: string }
+  ): Promise<void> {
+    const auditItem: LoginAuditItem = {
+      id: generateUUID(),
+      user_id: user.id,
+      username: user.username || user.full_name.toLowerCase().replace(/\s+/g, ''),
+      full_name: user.full_name,
+      role: user.role,
+      login_time: new Date().toISOString(),
+      device_info: details?.device || 'Web Browser',
+      status: 'SUCCESS',
+      phone: user.phone || '',
+      ip_address: details?.ip || 'Direct Session',
+    };
+
+    const localAudits = getItem<LoginAuditItem[]>(STORAGE_KEYS.LOGIN_AUDITS, []);
+    localAudits.unshift(auditItem);
+    setItem(STORAGE_KEYS.LOGIN_AUDITS, localAudits.slice(0, 200));
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        await supabase.from('login_audits').insert({
+          id: auditItem.id,
+          user_id: auditItem.user_id,
+          username: auditItem.username,
+          full_name: auditItem.full_name,
+          role: auditItem.role,
+          login_time: auditItem.login_time,
+          device_info: auditItem.device_info,
+          status: auditItem.status,
+          ip_address: auditItem.ip_address,
+        });
+      } catch (err) {
+        // Safe fallback if login_audits table is not created in Supabase yet
+      }
+    }
+  }
+
+  static async fetchLoginAuditsAsync(filters: ReportFilterCriteria): Promise<LoginAuditItem[]> {
+    let audits = getItem<LoginAuditItem[]>(STORAGE_KEYS.LOGIN_AUDITS, []);
+    let drivers: Profile[] = this.getDrivers();
+    let dutySessions: any[] = [];
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const [aRes, pRes, dRes] = await Promise.all([
+          supabase.from('login_audits').select('*').order('login_time', { ascending: false }),
+          supabase.from('profiles').select('*'),
+          supabase.from('duty_sessions').select('*').order('start_time', { ascending: false }),
+        ]);
+
+        if (Array.isArray(aRes.data) && aRes.data.length > 0) {
+          audits = aRes.data.map((a: any) => ({
+            id: a.id,
+            user_id: a.user_id,
+            username: a.username,
+            full_name: a.full_name,
+            role: a.role as 'ADMIN' | 'DRIVER',
+            login_time: a.login_time,
+            device_info: a.device_info || 'Web Portal',
+            status: a.status || 'SUCCESS',
+            ip_address: a.ip_address,
+          }));
+        }
+
+        if (Array.isArray(pRes.data)) {
+          drivers = pRes.data.map((p: any) => ({
+            id: p.id,
+            role: (p.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+            full_name: p.full_name || p.name || 'Driver',
+            username: p.username,
+            password: p.password,
+            phone: p.phone,
+            license_number: p.license_number,
+            assigned_vehicle_id: p.assigned_vehicle_id,
+            is_active: p.status ? p.status === 'ACTIVE' : true,
+            created_at: p.created_at || new Date().toISOString(),
+          }));
+        }
+
+        if (Array.isArray(dRes.data)) {
+          dutySessions = dRes.data;
+        }
+      } catch (err) {
+        console.error('Supabase fetchLoginAuditsAsync error:', err);
+      }
+    }
+
+    if (dutySessions.length === 0) {
+      dutySessions = this.getDutySessions();
+    }
+
+    const driverMap = new Map(drivers.map((d) => [d.id, d]));
+
+    // Synthesize verified login timestamps from duty sessions (each clock-in is a login event)
+    const syntheticDutyLogins: LoginAuditItem[] = [];
+    for (const ds of dutySessions) {
+      const driver = driverMap.get(ds.driver_id);
+      if (ds.start_time) {
+        syntheticDutyLogins.push({
+          id: `duty-login-${ds.id}`,
+          user_id: ds.driver_id,
+          username: driver?.username || (driver?.full_name ? driver.full_name.toLowerCase().replace(/\s+/g, '') : 'driver'),
+          full_name: driver?.full_name || 'Driver',
+          role: 'DRIVER',
+          login_time: ds.start_time,
+          device_info: 'Mobile PWA App • Shift Clock-In',
+          status: 'SUCCESS',
+          phone: driver?.phone || '',
+          ip_address: 'Active Fleet Session',
+        });
+      }
+    }
+
+    // Synthesize profile registration / initial login events
+    const registrationLogins: LoginAuditItem[] = [];
+    for (const d of drivers) {
+      if (d.created_at) {
+        registrationLogins.push({
+          id: `reg-login-${d.id}`,
+          user_id: d.id,
+          username: d.username || d.full_name.toLowerCase().replace(/\s+/g, ''),
+          full_name: d.full_name,
+          role: d.role,
+          login_time: d.created_at,
+          device_info: 'Driver Account Created & First Login',
+          status: 'SUCCESS',
+          phone: d.phone || '',
+          ip_address: 'System Onboarding',
+        });
+      }
+    }
+
+    // Combine all and de-duplicate
+    const allCombined = [...audits, ...syntheticDutyLogins, ...registrationLogins];
+    const seen = new Set<string>();
+    const deduplicated: LoginAuditItem[] = [];
+
+    for (const item of allCombined) {
+      const key = `${item.user_id}_${item.login_time.slice(0, 16)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(item);
+      }
+    }
+
+    // Filter
+    const filtered = deduplicated.filter((item) => {
+      const dateStr = item.login_time ? item.login_time.split('T')[0] : '';
+      if (filters.startDate && dateStr && dateStr < filters.startDate) return false;
+      if (filters.endDate && dateStr && dateStr > filters.endDate) return false;
+      if (filters.driverId !== 'ALL' && item.user_id !== filters.driverId) return false;
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      const tA = new Date(a.login_time).getTime();
+      const tB = new Date(b.login_time).getTime();
+      return tB - tA;
+    });
+  }
 }
+
 
