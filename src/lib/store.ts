@@ -167,86 +167,84 @@ export class FleetStore {
         supabase.from('fuel_expenses').select('*'),
       ]);
 
-      // 1. VEHICLES SYNC & UPLOAD
-      const localVehicles = this.getVehicles();
+      // 1. VEHICLES SYNC
       if (Array.isArray(vRes.data)) {
-        const cloudVehicles: Vehicle[] = vRes.data.map((row: any) => ({
-          id: row.id,
-          registration_number: row.registration_number,
-          model: row.model,
-          fuel_type: row.fuel_type || 'CNG',
-          is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
-          created_at: row.created_at || new Date().toISOString(),
-        }));
+        const seenRegs = new Set<string>();
+        const seenIds = new Set<string>();
+        const cloudVehicles: Vehicle[] = [];
 
-        const cloudVehicleIds = new Set(cloudVehicles.map((v) => v.id));
-        const unsyncedVehicles = localVehicles.filter((v) => !cloudVehicleIds.has(v.id));
-        for (const uv of unsyncedVehicles) {
-          supabase.from('vehicles').upsert({
-            id: uv.id,
-            registration_number: uv.registration_number,
-            model: uv.model,
-            fuel_type: uv.fuel_type,
-            status: uv.is_active ? 'ACTIVE' : 'INACTIVE',
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading vehicle to Supabase:', error);
-          });
+        for (const row of vRes.data) {
+          if (!row || !row.id || !row.registration_number) continue;
+          const cleanReg = row.registration_number.toUpperCase().replace(/\s+/g, '');
+          if (!seenIds.has(row.id) && !seenRegs.has(cleanReg)) {
+            seenIds.add(row.id);
+            seenRegs.add(cleanReg);
+            cloudVehicles.push({
+              id: row.id,
+              registration_number: row.registration_number.toUpperCase().trim(),
+              model: row.model || '',
+              fuel_type: row.fuel_type || 'CNG',
+              is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+              created_at: row.created_at || new Date().toISOString(),
+            });
+          }
         }
-
-        const mergedVehicles = [...cloudVehicles, ...unsyncedVehicles];
-        setItem(STORAGE_KEYS.VEHICLES, mergedVehicles);
+        // Supabase is the single source of truth for vehicles. Never auto-upload local duplicates!
+        setItem(STORAGE_KEYS.VEHICLES, cloudVehicles);
       }
 
-      // 2. COMPANIES SYNC & UPLOAD
-      const localCompanies = this.getCompanies();
+      // 2. COMPANIES SYNC
       if (Array.isArray(cRes.data)) {
-        const cloudCompanies: Company[] = cRes.data.map((row: any) => {
-          let rate = 0;
-          if (row.notes && !isNaN(parseFloat(row.notes))) {
-            rate = parseFloat(row.notes);
-          } else if (row.billing_rate_per_km !== undefined) {
-            rate = Number(row.billing_rate_per_km) || 0;
+        const seenNames = new Set<string>();
+        const seenIds = new Set<string>();
+        const cloudCompanies: Company[] = [];
+
+        for (const row of cRes.data) {
+          if (!row || !row.id) continue;
+          const rawName = row.company_name || row.name || '';
+          if (!rawName.trim()) continue;
+          const cleanName = rawName.trim().toLowerCase();
+          if (!seenIds.has(row.id) && !seenNames.has(cleanName)) {
+            seenIds.add(row.id);
+            seenNames.add(cleanName);
+            let rate = 0;
+            if (row.notes && !isNaN(parseFloat(row.notes))) {
+              rate = parseFloat(row.notes);
+            } else if (row.billing_rate_per_km !== undefined) {
+              rate = Number(row.billing_rate_per_km) || 0;
+            }
+            cloudCompanies.push({
+              id: row.id,
+              name: rawName.trim(),
+              contact_person: row.contact_person || '',
+              phone: row.phone || '',
+              email: row.email || '',
+              billing_rate_per_km: rate,
+              is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+              created_at: row.created_at || new Date().toISOString(),
+            });
           }
-          return {
-            id: row.id,
-            name: row.company_name || row.name || 'Unnamed Company',
-            contact_person: row.contact_person || '',
-            phone: row.phone || '',
-            email: row.email || '',
-            billing_rate_per_km: rate,
-            is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
-            created_at: row.created_at || new Date().toISOString(),
-          };
-        });
-
-        const cloudCompanyIds = new Set(cloudCompanies.map((c) => c.id));
-        const unsyncedCompanies = localCompanies.filter((c) => !cloudCompanyIds.has(c.id));
-        for (const uc of unsyncedCompanies) {
-          supabase.from('companies').upsert({
-            id: uc.id,
-            company_name: uc.name,
-            contact_person: uc.contact_person || null,
-            phone: uc.phone || null,
-            email: uc.email || null,
-            status: uc.is_active ? 'ACTIVE' : 'INACTIVE',
-            notes: uc.billing_rate_per_km ? String(uc.billing_rate_per_km) : null,
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading company to Supabase:', error);
-          });
         }
-
-        const mergedCompanies = [...cloudCompanies, ...unsyncedCompanies];
-        setItem(STORAGE_KEYS.COMPANIES, mergedCompanies);
+        // Supabase is the single source of truth for companies. Never auto-upload local duplicates!
+        setItem(STORAGE_KEYS.COMPANIES, cloudCompanies);
       }
 
       // 3. PROFILES / DRIVERS SYNC
       const localDrivers = this.getDrivers();
       if (Array.isArray(pRes.data)) {
-        const cloudProfiles: Profile[] = pRes.data
-          .filter((row: any) => row.role === 'DRIVER' || !row.role)
-          .map((row: any) => {
+        const seenUsernames = new Set<string>();
+        const seenIds = new Set<string>();
+        const cloudProfiles: Profile[] = [];
+
+        for (const row of pRes.data) {
+          if (!row || !row.id) continue;
+          if (row.role && row.role !== 'DRIVER') continue;
+          const rawUser = row.username ? row.username.trim().toLowerCase() : row.id;
+          if (!seenIds.has(row.id) && !seenUsernames.has(rawUser)) {
+            seenIds.add(row.id);
+            seenUsernames.add(rawUser);
             const existingLocal = localDrivers.find((d) => d.id === row.id || (row.username && d.username === row.username));
-            return {
+            cloudProfiles.push({
               id: row.id,
               role: 'DRIVER' as const,
               full_name: row.full_name || row.name || 'Unnamed Driver',
@@ -257,11 +255,9 @@ export class FleetStore {
               assigned_vehicle_id: row.assigned_vehicle_id || existingLocal?.assigned_vehicle_id,
               is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
               created_at: row.created_at || existingLocal?.created_at || new Date().toISOString(),
-            };
-          });
-
-        // Supabase is the single source of truth for drivers.
-        // Replace local storage with active cloud profiles. NEVER re-upload deleted drivers!
+            });
+          }
+        }
         setItem(STORAGE_KEYS.DRIVERS, cloudProfiles);
 
         // If the currently logged-in user is a driver that was deleted from Supabase, log them out immediately
@@ -385,7 +381,20 @@ export class FleetStore {
 
   // Vehicles
   static getVehicles(): Vehicle[] {
-    return getItem<Vehicle[]>(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES);
+    const raw = getItem<Vehicle[]>(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES);
+    const seenRegs = new Set<string>();
+    const seenIds = new Set<string>();
+    const deduplicated: Vehicle[] = [];
+    for (const v of raw) {
+      if (!v || !v.id || !v.registration_number) continue;
+      const cleanReg = v.registration_number.toUpperCase().replace(/\s+/g, '');
+      if (!seenIds.has(v.id) && !seenRegs.has(cleanReg)) {
+        seenIds.add(v.id);
+        seenRegs.add(cleanReg);
+        deduplicated.push(v);
+      }
+    }
+    return deduplicated;
   }
 
   static getActiveVehicles(): Vehicle[] {
@@ -395,20 +404,33 @@ export class FleetStore {
   static saveVehicle(vehicle: Partial<Vehicle> & { registration_number: string; model: string }): Vehicle {
     const vehicles = this.getVehicles();
     let targetVehicle: Vehicle;
+    const cleanReg = vehicle.registration_number.toUpperCase().trim();
+    const normReg = cleanReg.replace(/\s+/g, '');
 
-    if (vehicle.id) {
-      const idx = vehicles.findIndex((v) => v.id === vehicle.id);
+    const existingById = vehicle.id ? vehicles.find((v) => v.id === vehicle.id) : null;
+    const existingByReg = !vehicle.id ? vehicles.find((v) => v.registration_number.toUpperCase().replace(/\s+/g, '') === normReg) : null;
+    const target = existingById || existingByReg;
+
+    if (target) {
+      const idx = vehicles.findIndex((v) => v.id === target.id);
+      targetVehicle = {
+        ...target,
+        ...vehicle,
+        id: target.id,
+        registration_number: cleanReg,
+        model: vehicle.model ? vehicle.model.trim() : target.model,
+        fuel_type: vehicle.fuel_type || target.fuel_type,
+        is_active: vehicle.is_active !== undefined ? vehicle.is_active : target.is_active,
+      };
       if (idx !== -1) {
-        vehicles[idx] = { ...vehicles[idx], ...vehicle } as Vehicle;
-        targetVehicle = vehicles[idx];
+        vehicles[idx] = targetVehicle;
       } else {
-        targetVehicle = vehicle as Vehicle;
         vehicles.unshift(targetVehicle);
       }
     } else {
       targetVehicle = {
         id: generateUUID(),
-        registration_number: vehicle.registration_number.toUpperCase().trim(),
+        registration_number: cleanReg,
         model: vehicle.model.trim(),
         fuel_type: vehicle.fuel_type || 'CNG',
         is_active: vehicle.is_active !== undefined ? vehicle.is_active : true,
@@ -467,7 +489,20 @@ export class FleetStore {
 
   // Companies
   static getCompanies(): Company[] {
-    return getItem<Company[]>(STORAGE_KEYS.COMPANIES, INITIAL_COMPANIES);
+    const raw = getItem<Company[]>(STORAGE_KEYS.COMPANIES, INITIAL_COMPANIES);
+    const seenNames = new Set<string>();
+    const seenIds = new Set<string>();
+    const deduplicated: Company[] = [];
+    for (const c of raw) {
+      if (!c || !c.id || !c.name) continue;
+      const cleanName = c.name.trim().toLowerCase();
+      if (!seenIds.has(c.id) && !seenNames.has(cleanName)) {
+        seenIds.add(c.id);
+        seenNames.add(cleanName);
+        deduplicated.push(c);
+      }
+    }
+    return deduplicated;
   }
 
   static getActiveCompanies(): Company[] {
@@ -477,20 +512,33 @@ export class FleetStore {
   static saveCompany(company: Partial<Company> & { name: string }): Company {
     const companies = this.getCompanies();
     let targetCompany: Company;
+    const cleanName = company.name.trim();
+    const lowerName = cleanName.toLowerCase();
 
-    if (company.id) {
-      const idx = companies.findIndex((c) => c.id === company.id);
+    // Check if updating by ID, or if a company with this name already exists
+    const existingById = company.id ? companies.find((c) => c.id === company.id) : null;
+    const existingByName = !company.id ? companies.find((c) => c.name.trim().toLowerCase() === lowerName) : null;
+    const target = existingById || existingByName;
+
+    if (target) {
+      const idx = companies.findIndex((c) => c.id === target.id);
+      targetCompany = {
+        ...target,
+        ...company,
+        id: target.id,
+        name: cleanName,
+        billing_rate_per_km: company.billing_rate_per_km !== undefined ? company.billing_rate_per_km : target.billing_rate_per_km,
+        is_active: company.is_active !== undefined ? company.is_active : target.is_active,
+      };
       if (idx !== -1) {
-        companies[idx] = { ...companies[idx], ...company } as Company;
-        targetCompany = companies[idx];
+        companies[idx] = targetCompany;
       } else {
-        targetCompany = company as Company;
         companies.unshift(targetCompany);
       }
     } else {
       targetCompany = {
         id: generateUUID(),
-        name: company.name.trim(),
+        name: cleanName,
         contact_person: company.contact_person?.trim(),
         phone: company.phone?.trim(),
         email: company.email?.trim(),
@@ -553,7 +601,20 @@ export class FleetStore {
 
   // Drivers
   static getDrivers(): Profile[] {
-    return getItem<Profile[]>(STORAGE_KEYS.DRIVERS, INITIAL_DRIVERS);
+    const raw = getItem<Profile[]>(STORAGE_KEYS.DRIVERS, INITIAL_DRIVERS);
+    const seenUsernames = new Set<string>();
+    const seenIds = new Set<string>();
+    const deduplicated: Profile[] = [];
+    for (const d of raw) {
+      if (!d || !d.id) continue;
+      const cleanUser = d.username ? d.username.trim().toLowerCase() : d.id;
+      if (!seenIds.has(d.id) && !seenUsernames.has(cleanUser)) {
+        seenIds.add(d.id);
+        seenUsernames.add(cleanUser);
+        deduplicated.push(d);
+      }
+    }
+    return deduplicated;
   }
 
   static getActiveDrivers(): Profile[] {
@@ -563,19 +624,24 @@ export class FleetStore {
   static saveDriver(driver: Partial<Profile> & { full_name: string }): Profile {
     const drivers = this.getDrivers();
     let resultDriver: Profile;
-    const isNew = !driver.id;
+    const cleanUser = driver.username?.trim().toLowerCase();
 
-    if (driver.id) {
-      const idx = drivers.findIndex((d) => d.id === driver.id);
+    const existingById = driver.id ? drivers.find((d) => d.id === driver.id) : null;
+    const existingByUser = !driver.id && cleanUser ? drivers.find((d) => d.username?.toLowerCase() === cleanUser) : null;
+    const target = existingById || existingByUser;
+    const isNew = !target;
+
+    if (target) {
+      const idx = drivers.findIndex((d) => d.id === target.id);
+      const updateData: Partial<Profile> = { ...driver, id: target.id };
+      if (!driver.password) {
+        delete updateData.password;
+      }
+      resultDriver = { ...target, ...updateData } as Profile;
       if (idx !== -1) {
-        const updateData: Partial<Profile> = { ...driver };
-        if (!driver.password) {
-          delete updateData.password;
-        }
-        drivers[idx] = { ...drivers[idx], ...updateData } as Profile;
-        resultDriver = drivers[idx];
+        drivers[idx] = resultDriver;
       } else {
-        resultDriver = driver as Profile;
+        drivers.unshift(resultDriver);
       }
     } else {
       resultDriver = {
