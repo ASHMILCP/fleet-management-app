@@ -3,7 +3,10 @@
 -- RUN THIS SCRIPT IN YOUR SUPABASE SQL EDITOR TO FIX PERMISSIONS & DELETIONS
 -- ==============================================================================
 
--- 1. Add username and password columns to profiles table so any driver created in Admin portal can login from mobile & desktop
+-- 1. Remove foreign key from profiles to auth.users so any driver created in Admin portal is saved to Supabase without email rate limits
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;
+
+-- 2. Add username and password columns to profiles table so any driver created in Admin portal can login from mobile & desktop
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username VARCHAR(100);
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password VARCHAR(255);
 

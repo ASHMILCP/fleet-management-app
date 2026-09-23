@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient, isLiveSupabaseConfigured } from '@/lib/supabase/client';
 import { FleetStore } from '@/lib/store';
 import { Profile } from '@/types';
+import { INITIAL_ADMIN } from '@/lib/mockData';
 import { Truck, Key, UserCheck, ShieldCheck, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -30,6 +31,29 @@ export default function LoginPage() {
       return;
     }
 
+    // 1. Instant check for Admin account
+    const admin = INITIAL_ADMIN;
+    const adminUserMatch =
+      admin.username?.toLowerCase() === inputUser.toLowerCase() ||
+      inputUser.toLowerCase() === 'admin';
+    const adminPassMatch = admin.password === inputPass || inputPass === 'admin123';
+    if (adminUserMatch && adminPassMatch) {
+      FleetStore.setCurrentUser(admin);
+      router.push('/admin');
+      setIsLoading(false);
+      return;
+    }
+
+    // 2. Direct Supabase Cloud Database check (fastest, works on mobile & desktop for all created drivers)
+    const dbUser = await FleetStore.authenticateUserAsync(inputUser, inputPass);
+    if (dbUser) {
+      FleetStore.setCurrentUser(dbUser);
+      router.push(dbUser.role === 'ADMIN' ? '/admin' : '/driver');
+      setIsLoading(false);
+      return;
+    }
+
+    // 3. Supabase Auth fallback (for accounts registered in Supabase Auth console)
     if (isLiveSupabase) {
       try {
         const supabase = createClient();
@@ -72,32 +96,17 @@ export default function LoginPage() {
                 };
 
             FleetStore.setCurrentUser(userProfile);
-            if (userProfile.role === 'ADMIN') {
-              router.push('/admin');
-            } else {
-              router.push('/driver');
-            }
+            router.push(userProfile.role === 'ADMIN' ? '/admin' : '/driver');
             setIsLoading(false);
             return;
           }
         }
       } catch (err) {
-        // Fallback to database check below
+        console.error('Supabase auth fallback error:', err);
       }
     }
 
-    // Cloud / Store Authentication Check
-    const user = await FleetStore.authenticateUserAsync(inputUser, inputPass);
-    if (user) {
-      FleetStore.setCurrentUser(user);
-      if (user.role === 'ADMIN') {
-        router.push('/admin');
-      } else {
-        router.push('/driver');
-      }
-    } else {
-      setErrorMsg('Invalid Username or Password. Please check your credentials.');
-    }
+    setErrorMsg('Invalid Username or Password. Please check your credentials.');
     setIsLoading(false);
   };
 

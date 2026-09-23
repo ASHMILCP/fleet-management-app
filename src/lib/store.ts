@@ -263,6 +263,25 @@ export class FleetStore {
 
         const cloudProfileIds = new Set(cloudProfiles.map((p) => p.id));
         const unsyncedDrivers = localDrivers.filter((d) => !cloudProfileIds.has(d.id) && !deletedIds.has(d.id));
+        for (const ud of unsyncedDrivers) {
+          supabase.from('profiles').upsert({
+            id: ud.id,
+            name: ud.full_name,
+            phone: ud.phone || null,
+            role: 'DRIVER',
+            status: ud.is_active ? 'ACTIVE' : 'INACTIVE',
+            username: ud.username || null,
+            password: ud.password || null,
+          }).then(({ error }) => {
+            if (!error) {
+              supabase.from('drivers').upsert({
+                id: ud.id,
+                user_id: ud.id,
+                status: ud.is_active ? 'ACTIVE' : 'INACTIVE',
+              }).then(() => {}, () => {});
+            }
+          });
+        }
         const mergedDrivers = [...cloudProfiles, ...unsyncedDrivers];
         setItem(STORAGE_KEYS.DRIVERS, mergedDrivers);
       }
@@ -563,23 +582,21 @@ export class FleetStore {
 
         supabase.from('profiles').upsert(payload).then(({ error }) => {
           if (error) {
-            if (error.code === 'PGRST204' || error.message?.includes('column')) {
-              supabase.from('profiles').upsert({
-                id: targetId,
-                name: resultDriver.full_name,
-                phone: resultDriver.phone || null,
-                role: 'DRIVER',
-                status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
-              }).then(({ error: retryErr }) => {
-                if (retryErr) console.error('Supabase profile fallback upsert error:', retryErr);
-              });
-            } else {
-              console.error('Supabase direct profile save error:', error);
-            }
+            console.error('Supabase direct profile save error:', error);
+          } else {
+            supabase.from('drivers').upsert({
+              id: targetId,
+              user_id: targetId,
+              status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+            }).then(() => {}, () => {});
           }
         });
       };
 
+      // Persist profile immediately to Supabase Cloud Database
+      persistProfile(resultDriver.id);
+
+      // Optionally register with Supabase Auth in background if credentials provided
       if (isNew && resultDriver.username && resultDriver.password) {
         const email = resultDriver.username.includes('@') 
           ? resultDriver.username 
@@ -589,19 +606,14 @@ export class FleetStore {
           email,
           password: resultDriver.password,
         }).then(({ data, error }) => {
-          if (error) {
-            console.warn('Supabase auth signup notice:', error.message);
-            persistProfile(resultDriver.id);
-          } else if (data?.user?.id) {
+          if (!error && data?.user?.id && data.user.id !== resultDriver.id) {
             const oldId = resultDriver.id;
             resultDriver.id = data.user.id;
             const updatedDrivers = this.getDrivers().map((d) => (d.id === oldId ? resultDriver : d));
             setItem(STORAGE_KEYS.DRIVERS, updatedDrivers);
             persistProfile(data.user.id);
           }
-        });
-      } else {
-        persistProfile(resultDriver.id);
+        }).catch(() => {});
       }
     }
 
