@@ -72,7 +72,7 @@ export default function AdminVehiclesPage() {
   return (
     <div className="space-y-6">
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
             <Truck className="w-6 h-6 text-emerald-600" />
@@ -85,8 +85,10 @@ export default function AdminVehiclesPage() {
 
         <Button
           variant="primary"
+          size="sm"
           onClick={handleOpenAdd}
           leftIcon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto"
         >
           Add New Vehicle
         </Button>
@@ -94,7 +96,7 @@ export default function AdminVehiclesPage() {
 
       {/* FILTER & STATS BAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="relative max-w-sm w-full">
+        <div className="relative w-full sm:max-w-sm">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
@@ -109,9 +111,10 @@ export default function AdminVehiclesPage() {
         </div>
       </div>
 
-      {/* VEHICLES TABLE */}
+      {/* VEHICLES LIST / TABLE */}
       <Card>
-        <div className="overflow-x-auto">
+        {/* DESKTOP TABLE VIEW (>= md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
               <tr>
@@ -188,6 +191,82 @@ export default function AdminVehiclesPage() {
             </tbody>
           </table>
         </div>
+
+        {/* MOBILE CARDS VIEW (< md) */}
+        <div className="block md:hidden divide-y divide-slate-100">
+          {filteredVehicles.map((vehicle) => (
+            <div key={vehicle.id} className="py-4 first:pt-0 last:pb-0 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 font-bold font-mono text-sm">
+                  <Truck className="w-4 h-4 text-slate-500" />
+                  <span>{vehicle.registration_number}</span>
+                </div>
+                <Badge variant={vehicle.is_active ? 'success' : 'neutral'} size="sm">
+                  {vehicle.is_active ? 'In Service' : 'Deactivated'}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Model</span>
+                  <span className="font-semibold text-slate-800">{vehicle.model}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block text-right">Fuel</span>
+                  <Badge
+                    variant={vehicle.fuel_type === 'CNG' ? 'success' : 'warning'}
+                    size="sm"
+                  >
+                    <Fuel className="w-3 h-3" />
+                    {vehicle.fuel_type}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-50">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenEdit(vehicle)}
+                  leftIcon={<Edit2 className="w-3.5 h-3.5" />}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleToggleStatus(vehicle.id)}
+                  leftIcon={<Power className="w-3.5 h-3.5" />}
+                  className={vehicle.is_active ? 'text-amber-700 hover:bg-amber-50' : 'text-emerald-700 hover:bg-emerald-50'}
+                >
+                  {vehicle.is_active ? 'Deactivate' : 'Activate'}
+                </Button>
+                <button
+                  onClick={() => handleDeleteVehicle(vehicle)}
+                  title="Delete Vehicle"
+                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-slate-200 hover:border-rose-200"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {filteredVehicles.length === 0 && (
+          <div className="p-8 text-center space-y-3">
+            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+              <Truck className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-semibold text-slate-700">No Vehicles Found</p>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              Your fleet vehicle directory is empty. Click &quot;Add New Vehicle&quot; above to register your cars.
+            </p>
+            <Button variant="primary" size="sm" onClick={handleOpenAdd} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+              Add First Vehicle
+            </Button>
+          </div>
+        )}
       </Card>
 
       <VehicleModal

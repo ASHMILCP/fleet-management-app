@@ -113,12 +113,12 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* RIGHT ACTIONS: ROLE BADGE, SWITCHER, PROFILE */}
-          <div className="hidden sm:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2 lg:gap-3">
             {/* ROLE BADGE */}
             <Badge
               variant={isAdmin ? 'purple' : 'success'}
               size="md"
-              className="gap-1.5 font-bold"
+              className="gap-1.5 font-bold hidden xl:inline-flex"
             >
               {isAdmin ? <ShieldAlert className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
               {isAdmin ? 'ADMIN PORTAL' : 'DRIVER PORTAL'}
@@ -126,10 +126,10 @@ export const Navbar: React.FC = () => {
 
             {/* USER INFO */}
             <div className="text-right pl-2 border-l border-slate-200">
-              <div className="text-xs font-bold text-slate-800 leading-tight">
+              <div className="text-xs font-bold text-slate-800 leading-tight max-w-[120px] truncate">
                 {currentUser?.full_name || (isAdmin ? 'Admin' : 'Driver')}
               </div>
-              <div className="text-[10px] text-slate-400">
+              <div className="text-[10px] text-slate-400 max-w-[120px] truncate">
                 {currentUser?.username ? `@${currentUser.username}` : (currentUser?.phone || 'Fleet Associate')}
               </div>
             </div>
@@ -151,10 +151,10 @@ export const Navbar: React.FC = () => {
               <button
                 onClick={() => setIsAdminModalOpen(true)}
                 title="Admin Account & Credentials"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors"
               >
                 <KeyRound className="w-3.5 h-3.5 text-slate-500" />
-                <span>Admin Account</span>
+                <span className="hidden xl:inline">Admin Account</span>
               </button>
             )}
 
@@ -162,7 +162,7 @@ export const Navbar: React.FC = () => {
             <button
               onClick={handleLogout}
               title="Sign Out"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Sign Out</span>
@@ -170,7 +170,7 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* MOBILE MENU TOGGLE & QUICK INSTALL */}
-          <div className="flex sm:hidden items-center gap-2">
+          <div className="flex md:hidden items-center gap-2">
             {!isInstalled && (
               <button
                 onClick={openInstallModal}
@@ -194,7 +194,7 @@ export const Navbar: React.FC = () => {
 
       {/* MOBILE NAV DROPDOWN */}
       {mobileMenuOpen && (
-        <div className="sm:hidden border-t border-slate-100 bg-white px-4 pt-3 pb-4 space-y-2 animate-fadeIn">
+        <div className="md:hidden border-t border-slate-100 bg-white px-4 pt-3 pb-4 space-y-2 animate-fadeIn shadow-lg">
           <div className="pb-2 border-b border-slate-100 flex items-center justify-between">
             <Badge variant={isAdmin ? 'purple' : 'success'} size="sm">
               {isAdmin ? 'ADMIN' : 'DRIVER'}

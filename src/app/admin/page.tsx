@@ -98,10 +98,10 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* 1. WELCOME & TIMEZONE HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-4 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               Fleet Operations Control Center
             </h1>
             <Badge variant="purple" size="md">
@@ -109,18 +109,20 @@ export default function AdminDashboard() {
               ADMIN
             </Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span>Operational Date: <strong>{getTodayDateIST()}</strong></span>
-            <span className="text-slate-300">&bull;</span>
+          <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className="flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>Operational Date: <strong>{getTodayDateIST()}</strong></span>
+            </span>
+            <span className="text-slate-300 hidden sm:inline">&bull;</span>
             <span>Standard Timezone: <strong>Asia/Kolkata (IST)</strong></span>
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            size="md"
+            size="sm"
             onClick={() => setIsAdminModalOpen(true)}
             leftIcon={<KeyRound className="w-4 h-4 text-purple-600" />}
           >
@@ -129,7 +131,7 @@ export default function AdminDashboard() {
 
           <Button
             variant="outline"
-            size="md"
+            size="sm"
             onClick={loadDashboardData}
             disabled={isRefreshing}
             leftIcon={<RefreshCw className={`w-4 h-4 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />}
@@ -139,24 +141,18 @@ export default function AdminDashboard() {
 
           <Button
             variant="outline"
-            size="md"
+            size="sm"
             onClick={handleClearDemoData}
             leftIcon={<RotateCcw className="w-4 h-4 text-rose-600" />}
             className="border-rose-200 text-rose-700 hover:bg-rose-50"
           >
             Clear Demo Data
           </Button>
-
-          <Link href="/admin/reports">
-            <Button variant="primary" size="md" leftIcon={<FileSpreadsheet className="w-4 h-4" />}>
-              Generate Reports
-            </Button>
-          </Link>
         </div>
       </div>
 
       {/* 2. SUMMARY METRIC CARDS (ALL 7 REQUIRED BY SPEC) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Total Drivers */}
         <StatCard
           title="Total Drivers"
@@ -196,7 +192,7 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {/* Today's KM */}
         <StatCard
           title="Today's KM Logged"
@@ -263,21 +259,21 @@ export default function AdminDashboard() {
                   return (
                     <div
                       key={session.id}
-                      className="py-3.5 flex items-center justify-between gap-4 hover:bg-slate-50/50 rounded-xl px-2 transition-colors"
+                      className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-slate-50/50 rounded-xl px-2 sm:px-3 transition-colors"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-bold text-sm">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-bold text-sm shrink-0">
                           {driver?.full_name?.charAt(0) || 'D'}
                         </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 truncate">
                             {driver?.full_name || 'Driver'}
                           </div>
-                          <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                          <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <span>Phone: {driver?.phone || 'N/A'}</span>
                             {vehicle && (
                               <>
-                                <span>&bull;</span>
+                                <span className="text-slate-300">&bull;</span>
                                 <span className="font-mono text-slate-700 font-semibold">
                                   {vehicle.registration_number}
                                 </span>
@@ -287,11 +283,11 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      <div className="text-right">
+                      <div className="flex items-center justify-between sm:flex-col sm:items-end w-full sm:w-auto pt-2 sm:pt-0 border-t border-slate-100 sm:border-t-0 pl-13 sm:pl-0">
                         <Badge variant="warning" size="sm">
                           ON DUTY
                         </Badge>
-                        <div className="text-xs text-slate-500 mt-1">
+                        <div className="text-xs text-slate-500 mt-0.5 sm:mt-1">
                           Started: <strong className="font-mono text-slate-800">{formatTimeIST(session.start_time)}</strong>
                         </div>
                       </div>
