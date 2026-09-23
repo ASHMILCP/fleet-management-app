@@ -51,8 +51,8 @@ export const InstallModal: React.FC = () => {
         <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 px-6 pt-6 pb-5 text-white">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25 flex items-center justify-center shadow-inner">
-                <Truck className="w-6 h-6 text-white" />
+              <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25 flex items-center justify-center shadow-inner overflow-hidden p-0.5">
+                <img src="/icons/icon-192x192.png" alt="FleetPro" className="w-full h-full object-cover rounded-xl shadow-md" />
               </div>
               <div>
                 <h3 className="text-lg font-black tracking-tight text-white flex items-center gap-2">

@@ -21,8 +21,8 @@ export const InstallPromptBanner: React.FC = () => {
     <div className="fixed bottom-3 inset-x-3 sm:inset-x-auto sm:right-6 sm:bottom-6 z-40 max-w-md animate-slideUp">
       <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 sm:p-4 rounded-2xl shadow-xl shadow-slate-950/20 border border-slate-700/80 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center shrink-0 shadow-md shadow-blue-500/25">
-            <Truck className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-md shadow-blue-500/25 border border-slate-700/60">
+            <img src="/icons/icon-192x192.png" alt="FleetPro" className="w-full h-full object-cover" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">

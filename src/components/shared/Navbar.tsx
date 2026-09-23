@@ -75,11 +75,10 @@ export const Navbar: React.FC = () => {
     <nav className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* LOGO & BRAND */}
           <div className="flex items-center gap-8">
             <Link href={isAdmin ? '/admin' : '/driver'} className="flex items-center gap-2.5 group">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
-                <Truck className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform border border-slate-200/60">
+                <img src="/icons/icon-192x192.png" alt="FleetPro" className="w-full h-full object-cover" />
               </div>
               <div>
                 <span className="text-lg font-black tracking-tight text-slate-900 flex items-center gap-1">
