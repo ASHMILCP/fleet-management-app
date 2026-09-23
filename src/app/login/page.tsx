@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient, isLiveSupabaseConfigured } from '@/lib/supabase/client';
 import { FleetStore } from '@/lib/store';
+import { Profile } from '@/types';
 import { Truck, Key, UserCheck, ShieldCheck, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -32,30 +33,56 @@ export default function LoginPage() {
     if (isLiveSupabase) {
       try {
         const supabase = createClient();
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: inputUser.includes('@') ? inputUser : `${inputUser}@fleetpro.in`,
-          password: inputPass,
-        });
+        const candidateEmails = inputUser.includes('@')
+          ? [inputUser]
+          : [
+              `${inputUser}@fleetpro.in`,
+              `${inputUser}@fleetapp.com`,
+              `${inputUser.toLowerCase()}@fleetapp.com`,
+            ];
 
-        if (!error && data.user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', data.user.id)
-            .single();
+        for (const email of candidateEmails) {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password: inputPass,
+          });
 
-          if (profile?.role === 'ADMIN') {
-            FleetStore.setCurrentUser(profile);
-            router.push('/admin');
-          } else {
-            FleetStore.setCurrentUser(profile);
-            router.push('/driver');
+          if (!error && data.user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', data.user.id)
+              .maybeSingle();
+
+            const userProfile: Profile = profile
+              ? {
+                  id: profile.id,
+                  role: (profile.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+                  full_name: profile.name || profile.full_name || inputUser,
+                  phone: profile.phone,
+                  is_active: profile.status ? profile.status === 'ACTIVE' : true,
+                  created_at: profile.created_at || new Date().toISOString(),
+                }
+              : {
+                  id: data.user.id,
+                  role: (data.user.user_metadata?.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+                  full_name: data.user.user_metadata?.full_name || inputUser,
+                  is_active: true,
+                  created_at: new Date().toISOString(),
+                };
+
+            FleetStore.setCurrentUser(userProfile);
+            if (userProfile.role === 'ADMIN') {
+              router.push('/admin');
+            } else {
+              router.push('/driver');
+            }
+            setIsLoading(false);
+            return;
           }
-          setIsLoading(false);
-          return;
         }
       } catch (err) {
-        // Fallback to local store authentication below
+        // Fallback to database check below
       }
     }
 

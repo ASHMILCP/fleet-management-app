@@ -33,6 +33,7 @@ const STORAGE_KEYS = {
   FUEL_LOGS: 'fleet_fuel_logs_v1',
   CURRENT_USER: 'fleet_current_user_v1',
   INITIALIZED: 'fleet_initialized_v1',
+  DELETED_DRIVERS: 'fleet_deleted_drivers_v1',
 };
 
 // Safe LocalStorage helpers
@@ -240,25 +241,28 @@ export class FleetStore {
 
       // 3. PROFILES / DRIVERS SYNC & MERGE
       const localDrivers = this.getDrivers();
+      const deletedIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_DRIVERS, []));
       if (Array.isArray(pRes.data)) {
-        const cloudProfiles: Profile[] = pRes.data.map((row: any) => {
-          const existingLocal = localDrivers.find((d) => d.id === row.id || (row.phone && d.phone === row.phone) || (row.name && d.full_name === row.name));
-          return {
-            id: row.id,
-            role: (row.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
-            full_name: row.full_name || row.name || 'Unnamed Driver',
-            phone: row.phone || existingLocal?.phone || '',
-            username: existingLocal?.username || (row.name ? row.name.toLowerCase().replace(/\s+/g, '') : undefined),
-            password: existingLocal?.password,
-            license_number: row.license_number || existingLocal?.license_number,
-            assigned_vehicle_id: row.assigned_vehicle_id || existingLocal?.assigned_vehicle_id,
-            is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
-            created_at: row.created_at || existingLocal?.created_at || new Date().toISOString(),
-          };
-        });
+        const cloudProfiles: Profile[] = pRes.data
+          .filter((row: any) => !deletedIds.has(row.id))
+          .map((row: any) => {
+            const existingLocal = localDrivers.find((d) => d.id === row.id || (row.phone && d.phone === row.phone) || (row.name && d.full_name === row.name));
+            return {
+              id: row.id,
+              role: (row.role as 'ADMIN' | 'DRIVER') || 'DRIVER',
+              full_name: row.full_name || row.name || 'Unnamed Driver',
+              phone: row.phone || existingLocal?.phone || '',
+              username: row.username || existingLocal?.username || (row.name ? row.name.toLowerCase().replace(/\s+/g, '') : undefined),
+              password: row.password || existingLocal?.password,
+              license_number: row.license_number || existingLocal?.license_number,
+              assigned_vehicle_id: row.assigned_vehicle_id || existingLocal?.assigned_vehicle_id,
+              is_active: row.status ? row.status === 'ACTIVE' : (row.is_active !== undefined ? row.is_active : true),
+              created_at: row.created_at || existingLocal?.created_at || new Date().toISOString(),
+            };
+          });
 
         const cloudProfileIds = new Set(cloudProfiles.map((p) => p.id));
-        const unsyncedDrivers = localDrivers.filter((d) => !cloudProfileIds.has(d.id));
+        const unsyncedDrivers = localDrivers.filter((d) => !cloudProfileIds.has(d.id) && !deletedIds.has(d.id));
         const mergedDrivers = [...cloudProfiles, ...unsyncedDrivers];
         setItem(STORAGE_KEYS.DRIVERS, mergedDrivers);
       }
@@ -547,14 +551,32 @@ export class FleetStore {
       const supabase = createClient();
       
       const persistProfile = (targetId: string) => {
-        supabase.from('profiles').upsert({
+        const payload: Record<string, any> = {
           id: targetId,
           name: resultDriver.full_name,
           phone: resultDriver.phone || null,
           role: 'DRIVER',
           status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
-        }).then(({ error }) => {
-          if (error) console.error('Supabase direct profile save error:', error);
+        };
+        if (resultDriver.username) payload.username = resultDriver.username;
+        if (resultDriver.password) payload.password = resultDriver.password;
+
+        supabase.from('profiles').upsert(payload).then(({ error }) => {
+          if (error) {
+            if (error.code === 'PGRST204' || error.message?.includes('column')) {
+              supabase.from('profiles').upsert({
+                id: targetId,
+                name: resultDriver.full_name,
+                phone: resultDriver.phone || null,
+                role: 'DRIVER',
+                status: resultDriver.is_active ? 'ACTIVE' : 'INACTIVE',
+              }).then(({ error: retryErr }) => {
+                if (retryErr) console.error('Supabase profile fallback upsert error:', retryErr);
+              });
+            } else {
+              console.error('Supabase direct profile save error:', error);
+            }
+          }
         });
       };
 
@@ -586,10 +608,17 @@ export class FleetStore {
     return resultDriver;
   }
 
-  static deleteDriver(id: string): void {
+  static async deleteDriverAsync(id: string): Promise<boolean> {
     const drivers = this.getDrivers();
     const filteredDrivers = drivers.filter((d) => d.id !== id);
     setItem(STORAGE_KEYS.DRIVERS, filteredDrivers);
+
+    // Track deleted driver ID so syncWithSupabase never restores it
+    const deleted = getItem<string[]>(STORAGE_KEYS.DELETED_DRIVERS, []);
+    if (!deleted.includes(id)) {
+      deleted.push(id);
+      setItem(STORAGE_KEYS.DELETED_DRIVERS, deleted);
+    }
 
     const sessions = this.getDutySessions();
     const filteredSessions = sessions.filter((s) => s.driver_id !== id);
@@ -597,15 +626,34 @@ export class FleetStore {
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       const supabase = createClient();
-      supabase.from('profiles').delete().eq('id', id).then(({ error }) => {
-        if (error) console.error('Supabase direct profile delete error:', error);
-      });
+      try {
+        // First delete child records that might cause foreign key blocks
+        await Promise.allSettled([
+          supabase.from('fuel_expenses').delete().eq('driver_id', id),
+          supabase.from('trips').delete().eq('driver_id', id),
+          supabase.from('duty_sessions').delete().eq('driver_id', id),
+          supabase.from('drivers').delete().eq('user_id', id),
+          supabase.from('drivers').delete().eq('id', id),
+        ]);
+        const { error } = await supabase.from('profiles').delete().eq('id', id);
+        if (error) {
+          console.error('Supabase direct profile delete error:', error);
+          return false;
+        }
+      } catch (err) {
+        console.error('Supabase deleteDriverAsync error:', err);
+      }
     }
 
     const current = this.getCurrentUser();
     if (current && current.id === id) {
       this.logout();
     }
+    return true;
+  }
+
+  static deleteDriver(id: string): void {
+    this.deleteDriverAsync(id);
   }
 
   static toggleDriverStatus(id: string): void {
@@ -659,14 +707,33 @@ export class FleetStore {
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        const { data: profiles } = await supabase.from('profiles').select('*').eq('is_active', true);
+        const { data: profiles, error } = await supabase.from('profiles').select('*');
         if (profiles && profiles.length > 0) {
-          const matched = profiles.find((d: Profile) => {
-            const uMatch = d.username?.toLowerCase() === query || d.full_name?.toLowerCase().includes(query) || (d.phone && d.phone.includes(query));
+          const matched = profiles.find((d: any) => {
+            const isActive = d.status ? d.status === 'ACTIVE' : (d.is_active !== undefined ? d.is_active : true);
+            if (!isActive) return false;
+
+            const uMatch = (d.username && d.username.toLowerCase() === query) ||
+                           (d.name && d.name.toLowerCase().includes(query)) ||
+                           (d.full_name && d.full_name.toLowerCase().includes(query)) ||
+                           (d.phone && d.phone.includes(query));
             const pMatch = d.password ? d.password === pass : true;
             return uMatch && pMatch;
           });
-          if (matched) return matched;
+          if (matched) {
+            return {
+              id: matched.id,
+              role: matched.role || 'DRIVER',
+              full_name: matched.name || matched.full_name || 'Driver',
+              username: matched.username,
+              password: matched.password,
+              phone: matched.phone,
+              license_number: matched.license_number,
+              assigned_vehicle_id: matched.assigned_vehicle_id,
+              is_active: true,
+              created_at: matched.created_at || new Date().toISOString(),
+            };
+          }
         }
       } catch (err) {
         console.error('Supabase async auth check error:', err);

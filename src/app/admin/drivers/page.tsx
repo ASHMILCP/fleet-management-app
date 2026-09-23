@@ -57,9 +57,10 @@ export default function AdminDriversPage() {
     loadData();
   };
 
-  const handleDeleteDriver = (driver: Profile) => {
+  const handleDeleteDriver = async (driver: Profile) => {
     if (confirm(`Are you sure you want to delete driver "${driver.full_name}"? This action cannot be undone.`)) {
-      FleetStore.deleteDriver(driver.id);
+      setDrivers((prev) => prev.filter((d) => d.id !== driver.id));
+      await FleetStore.deleteDriverAsync(driver.id);
       loadData();
     }
   };
