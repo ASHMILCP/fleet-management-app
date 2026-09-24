@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
-import { Profile, Trip, FuelLog, UberEarning, DriverTodaySummary, Company } from '@/types';
+import { Profile, Trip, FuelLog, DriverTodaySummary, Company } from '@/types';
 import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
 import { AddTripDialog } from '@/components/driver/AddTripDialog';
@@ -23,8 +23,6 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  TrendingUp,
-  Trash2,
 } from 'lucide-react';
 
 export default function DriverDashboard() {
@@ -51,7 +49,6 @@ export default function DriverDashboard() {
   });
   const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [todayFuelLogs, setTodayFuelLogs] = useState<FuelLog[]>([]);
-  const [todayUberEarnings, setTodayUberEarnings] = useState<UberEarning[]>([]);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   const refreshData = useCallback(async () => {
@@ -65,11 +62,10 @@ export default function DriverDashboard() {
     setCompanies(FleetStore.getCompanies());
 
     try {
-      const [summary, allTrips, allFuel, allUber] = await Promise.all([
+      const [summary, allTrips, allFuel] = await Promise.all([
         FleetStore.fetchDriverTodaySummaryAsync(user.id),
         FleetStore.fetchTripsAsync(),
         FleetStore.fetchFuelLogsAsync(),
-        FleetStore.fetchUberEarningsAsync(),
       ]);
 
       setTodaySummary(summary);
@@ -84,11 +80,6 @@ export default function DriverDashboard() {
         (f) => f.driver_id === user.id && f.log_date === today
       );
       setTodayFuelLogs(userFuelToday);
-
-      const userUberToday = allUber.filter(
-        (u) => u.driver_id === user.id && (u.earnings_date === today || (u.created_at && u.created_at.startsWith(today)))
-      );
-      setTodayUberEarnings(userUberToday);
     } catch (err) {
       console.error('Error refreshing driver data:', err);
     }
@@ -100,16 +91,6 @@ export default function DriverDashboard() {
 
   const handleStateChange = () => {
     setRefreshIndex((prev) => prev + 1);
-  };
-
-  const handleDeleteUber = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this Uber earnings log?')) return;
-    try {
-      await FleetStore.deleteUberEarningAsync(id);
-      handleStateChange();
-    } catch (err) {
-      console.error('Error deleting uber earning:', err);
-    }
   };
 
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
@@ -231,20 +212,20 @@ export default function DriverDashboard() {
                 <Car className="w-6 h-6 text-emerald-400" />
               </div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold">Log Uber Earnings</h3>
+                <h3 className="text-lg font-bold">Log Uber Shift</h3>
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-md border border-emerald-500/30 uppercase">
-                  Payout
+                  Payout &amp; Rides
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                Record daily Uber rides revenue &amp; completed trips. Automatically increases your gross daily revenue and net profit.
+                Record daily completed Uber rides &amp; platform payout to sync directly with fleet administration.
               </p>
             </div>
             <button
               onClick={() => setIsUberDialogOpen(true)}
               className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-emerald-50 hover:text-emerald-900 transition-colors shadow-sm flex items-center justify-center gap-2 group"
             >
-              <span>Add Uber Earnings</span>
+              <span>Add Uber Record</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
@@ -365,76 +346,6 @@ export default function DriverDashboard() {
                       <span className="text-base font-bold text-slate-900 font-mono">
                         {formatCurrencyINR(fuel.amount)}
                       </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Today's Uber Earnings */}
-          <Card
-            title={
-              <div className="flex items-center gap-2">
-                <Car className="w-4 h-4 text-emerald-600" />
-                <span>Today&apos;s Uber Earnings ({todayUberEarnings.length})</span>
-              </div>
-            }
-            subtitle="Platform revenue credited towards today's total earnings"
-            action={
-              todayUberEarnings.length > 0 ? (
-                <Badge variant="success" size="sm">
-                  Total: {formatCurrencyINR(todayUberEarnings.reduce((s, u) => s + Number(u.amount || 0), 0))}
-                </Badge>
-              ) : undefined
-            }
-          >
-            {todayUberEarnings.length === 0 ? (
-              <div className="text-center py-6 text-slate-400">
-                <Car className="w-8 h-8 mx-auto mb-1 opacity-30 stroke-[1.5]" />
-                <p className="text-xs font-medium">No Uber earnings logged yet today.</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Click &ldquo;Add Uber&rdquo; above to record today&apos;s rides payout.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {todayUberEarnings.map((uber) => (
-                  <div
-                    key={uber.id}
-                    className="py-3 flex items-center justify-between hover:bg-slate-50/50 rounded-xl px-2 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-black text-white flex items-center justify-center text-[10px] font-black tracking-tight shrink-0">
-                        UBER
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                          <span>{uber.notes || 'Uber Platform Rides'}</span>
-                          {uber.rides_count && (
-                            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
-                              {uber.rides_count} {uber.rides_count === 1 ? 'ride' : 'rides'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-400">
-                          {formatTimeIST(uber.created_at)} &bull; {uber.earnings_date}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <span className="text-base font-extrabold text-emerald-700 font-mono">
-                          +{formatCurrencyINR(uber.amount)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteUber(uber.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="Delete this Uber entry"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
                     </div>
                   </div>
                 ))}

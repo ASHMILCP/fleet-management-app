@@ -108,7 +108,7 @@ export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Reflects instantly in your Daily Gross &amp; Net Earnings
+                Syncs directly with fleet management &amp; admin reporting
               </p>
             </div>
           </div>
