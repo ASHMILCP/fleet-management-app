@@ -169,7 +169,7 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Today's KM */}
         <StatCard
           title="Today's KM Logged"
@@ -199,6 +199,19 @@ export default function AdminDashboard() {
           }
           icon={<TrendingUp className="w-5 h-5" />}
           variant="rose"
+        />
+
+        {/* Today's Fleet Revenue */}
+        <StatCard
+          title="Today's Fleet Revenue"
+          value={formatCurrencyINR(metrics.todayTotalEarnings || 0)}
+          subtitle={
+            metrics.todayUberEarnings && metrics.todayUberEarnings > 0
+              ? `Includes ${formatCurrencyINR(metrics.todayUberEarnings)} Uber`
+              : 'Corporate trips & Uber earnings'
+          }
+          icon={<Car className="w-5 h-5 text-emerald-500" />}
+          variant="emerald"
         />
       </div>
 

@@ -3,11 +3,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
-import { Profile, Trip, FuelLog, DriverTodaySummary, Company } from '@/types';
+import { Profile, Trip, FuelLog, UberEarning, DriverTodaySummary, Company } from '@/types';
 import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
 import { AddTripDialog } from '@/components/driver/AddTripDialog';
 import { AddFuelDialog } from '@/components/driver/AddFuelDialog';
+import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { TodaySummaryCard } from '@/components/driver/TodaySummaryCard';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -22,6 +23,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
+  TrendingUp,
+  Trash2,
 } from 'lucide-react';
 
 export default function DriverDashboard() {
@@ -29,6 +32,7 @@ export default function DriverDashboard() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isTripDialogOpen, setIsTripDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
+  const [isUberDialogOpen, setIsUberDialogOpen] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [todaySummary, setTodaySummary] = useState<DriverTodaySummary>({
     dutySession: null,
@@ -40,9 +44,14 @@ export default function DriverDashboard() {
     totalKm: 0,
     fuelExpense: 0,
     fuelCostPerKm: 0,
+    uberEarnings: 0,
+    tripEarnings: 0,
+    totalEarnings: 0,
+    netEarnings: 0,
   });
   const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [todayFuelLogs, setTodayFuelLogs] = useState<FuelLog[]>([]);
+  const [todayUberEarnings, setTodayUberEarnings] = useState<UberEarning[]>([]);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   const refreshData = useCallback(async () => {
@@ -56,10 +65,11 @@ export default function DriverDashboard() {
     setCompanies(FleetStore.getCompanies());
 
     try {
-      const [summary, allTrips, allFuel] = await Promise.all([
+      const [summary, allTrips, allFuel, allUber] = await Promise.all([
         FleetStore.fetchDriverTodaySummaryAsync(user.id),
         FleetStore.fetchTripsAsync(),
         FleetStore.fetchFuelLogsAsync(),
+        FleetStore.fetchUberEarningsAsync(),
       ]);
 
       setTodaySummary(summary);
@@ -74,6 +84,11 @@ export default function DriverDashboard() {
         (f) => f.driver_id === user.id && f.log_date === today
       );
       setTodayFuelLogs(userFuelToday);
+
+      const userUberToday = allUber.filter(
+        (u) => u.driver_id === user.id && (u.earnings_date === today || (u.created_at && u.created_at.startsWith(today)))
+      );
+      setTodayUberEarnings(userUberToday);
     } catch (err) {
       console.error('Error refreshing driver data:', err);
     }
@@ -85,6 +100,16 @@ export default function DriverDashboard() {
 
   const handleStateChange = () => {
     setRefreshIndex((prev) => prev + 1);
+  };
+
+  const handleDeleteUber = async (id: string) => {
+    if (!confirm('Are you sure you want to remove this Uber earnings log?')) return;
+    try {
+      await FleetStore.deleteUberEarningAsync(id);
+      handleStateChange();
+    } catch (err) {
+      console.error('Error deleting uber earning:', err);
+    }
   };
 
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
@@ -115,7 +140,7 @@ export default function DriverDashboard() {
         </div>
 
         {/* QUICK ACTION SHORTCUTS */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
             size="md"
@@ -131,6 +156,15 @@ export default function DriverDashboard() {
             leftIcon={<Fuel className="w-4 h-4 text-amber-600" />}
           >
             Add Fuel
+          </Button>
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => setIsUberDialogOpen(true)}
+            className="bg-slate-900 hover:bg-black text-white border-slate-900 shadow-sm"
+            leftIcon={<Car className="w-4 h-4 text-emerald-400" />}
+          >
+            Add Uber
           </Button>
         </div>
       </div>
@@ -150,6 +184,7 @@ export default function DriverDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ACTION TILES */}
         <div className="space-y-4 lg:col-span-1">
+          {/* Tile 1: Log Trip */}
           <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 text-white shadow-lg shadow-blue-600/20 flex flex-col justify-between">
             <div>
               <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
@@ -169,6 +204,7 @@ export default function DriverDashboard() {
             </button>
           </div>
 
+          {/* Tile 2: Log Fuel */}
           <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl p-6 text-white shadow-lg shadow-amber-500/20 flex flex-col justify-between">
             <div>
               <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
@@ -184,6 +220,31 @@ export default function DriverDashboard() {
               className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-amber-700 font-bold text-sm hover:bg-amber-50 transition-colors shadow-sm flex items-center justify-center gap-2 group"
             >
               <span>Record Fuel Slip</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
+
+          {/* Tile 3: Log Uber Earnings */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 text-white shadow-lg shadow-emerald-950/20 flex flex-col justify-between border border-slate-700/60">
+            <div>
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
+                <Car className="w-6 h-6 text-emerald-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold">Log Uber Earnings</h3>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-md border border-emerald-500/30 uppercase">
+                  Payout
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                Record daily Uber rides revenue &amp; completed trips. Automatically increases your gross daily revenue and net profit.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsUberDialogOpen(true)}
+              className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-emerald-50 hover:text-emerald-900 transition-colors shadow-sm flex items-center justify-center gap-2 group"
+            >
+              <span>Add Uber Earnings</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
@@ -310,6 +371,76 @@ export default function DriverDashboard() {
               </div>
             )}
           </Card>
+
+          {/* Today's Uber Earnings */}
+          <Card
+            title={
+              <div className="flex items-center gap-2">
+                <Car className="w-4 h-4 text-emerald-600" />
+                <span>Today&apos;s Uber Earnings ({todayUberEarnings.length})</span>
+              </div>
+            }
+            subtitle="Platform revenue credited towards today's total earnings"
+            action={
+              todayUberEarnings.length > 0 ? (
+                <Badge variant="success" size="sm">
+                  Total: {formatCurrencyINR(todayUberEarnings.reduce((s, u) => s + Number(u.amount || 0), 0))}
+                </Badge>
+              ) : undefined
+            }
+          >
+            {todayUberEarnings.length === 0 ? (
+              <div className="text-center py-6 text-slate-400">
+                <Car className="w-8 h-8 mx-auto mb-1 opacity-30 stroke-[1.5]" />
+                <p className="text-xs font-medium">No Uber earnings logged yet today.</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Click &ldquo;Add Uber&rdquo; above to record today&apos;s rides payout.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {todayUberEarnings.map((uber) => (
+                  <div
+                    key={uber.id}
+                    className="py-3 flex items-center justify-between hover:bg-slate-50/50 rounded-xl px-2 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-black text-white flex items-center justify-center text-[10px] font-black tracking-tight shrink-0">
+                        UBER
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <span>{uber.notes || 'Uber Platform Rides'}</span>
+                          {uber.rides_count && (
+                            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                              {uber.rides_count} {uber.rides_count === 1 ? 'ride' : 'rides'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {formatTimeIST(uber.created_at)} &bull; {uber.earnings_date}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="text-base font-extrabold text-emerald-700 font-mono">
+                          +{formatCurrencyINR(uber.amount)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteUber(uber.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Delete this Uber entry"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
       </div>
 
@@ -327,6 +458,12 @@ export default function DriverDashboard() {
             isOpen={isFuelDialogOpen}
             onClose={() => setIsFuelDialogOpen(false)}
             onFuelAdded={handleStateChange}
+          />
+          <AddUberEarningsDialog
+            driverId={currentUser.id}
+            isOpen={isUberDialogOpen}
+            onClose={() => setIsUberDialogOpen(false)}
+            onUberEarningAdded={handleStateChange}
           />
         </>
       )}

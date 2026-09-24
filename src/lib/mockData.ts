@@ -1,4 +1,4 @@
-import { Profile, Vehicle, Company, DutySession, Trip, FuelLog } from '@/types';
+import { Profile, Vehicle, Company, DutySession, Trip, FuelLog, UberEarning } from '@/types';
 
 export const INITIAL_VEHICLES: Vehicle[] = [];
 export const INITIAL_COMPANIES: Company[] = [];
@@ -18,3 +18,4 @@ export const INITIAL_ADMIN: Profile = {
 export const INITIAL_DUTY_SESSIONS: DutySession[] = [];
 export const INITIAL_TRIPS: Trip[] = [];
 export const INITIAL_FUEL_LOGS: FuelLog[] = [];
+export const INITIAL_UBER_EARNINGS: UberEarning[] = [];

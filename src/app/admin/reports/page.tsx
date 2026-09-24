@@ -130,6 +130,10 @@ export default function AdminReportsPage() {
     () => reportItems.reduce((sum, item) => sum + (item.earnings || 0), 0),
     [reportItems]
   );
+  const uberEarningsTotal = useMemo(
+    () => reportItems.filter((i) => i.company_name === 'Uber Platform').reduce((sum, item) => sum + (item.earnings || 0), 0),
+    [reportItems]
+  );
   const totalFuel = useMemo(
     () => reportItems.reduce((sum, item) => sum + (item.fuel_amount || 0), 0),
     [reportItems]
@@ -550,7 +554,8 @@ export default function AdminReportsPage() {
               onChange={(e) => setSelectedCompanyId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
-              <option value="ALL">All Companies</option>
+              <option value="ALL">All Companies &amp; Platforms</option>
+              <option value="UBER">🚕 Uber Platform Earnings</option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -605,7 +610,11 @@ export default function AdminReportsPage() {
             <div className="text-xl sm:text-2xl font-black text-emerald-950 font-mono mt-1 truncate">
               {formatCurrencyINR(totalEarnings)}
             </div>
-            <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-0.5 sm:mt-1 truncate">KM &times; Company Rate</div>
+            <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-0.5 sm:mt-1 truncate">
+              {uberEarningsTotal > 0
+                ? `Trips + Uber (${formatCurrencyINR(uberEarningsTotal)})`
+                : 'Trips & Platform revenue'}
+            </div>
           </div>
 
           <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-amber-200 shadow-xs">
@@ -814,11 +823,26 @@ export default function AdminReportsPage() {
                         <td className="py-3.5 px-4 font-mono text-xs font-semibold text-slate-700">
                           {item.vehicle_reg || <span className="text-slate-400">-</span>}
                         </td>
-                        <td className="py-3.5 px-4 text-slate-800 font-medium">{item.company_name}</td>
+                        <td className="py-3.5 px-4 text-slate-800 font-medium">
+                          {item.company_name === 'Uber Platform' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-black text-white text-xs font-bold">
+                              <span>UBER</span>
+                              <span className="font-normal text-[10px] text-emerald-400">Platform</span>
+                            </span>
+                          ) : (
+                            item.company_name
+                          )}
+                        </td>
                         <td className="py-3.5 px-4">
-                          <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
-                            {item.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
-                          </Badge>
+                          {item.company_name === 'Uber Platform' ? (
+                            <Badge variant="success" size="sm">
+                              PAYOUT
+                            </Badge>
+                          ) : (
+                            <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
+                              {item.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
+                            </Badge>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 text-right font-mono text-slate-600">
                           {item.one_side_km} km
@@ -901,15 +925,30 @@ export default function AdminReportsPage() {
                           <div className="text-[11px] text-slate-400 font-mono">{item.driver_phone}</div>
                         )}
                       </div>
-                      <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
-                        {item.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
-                      </Badge>
+                      {item.company_name === 'Uber Platform' ? (
+                        <Badge variant="success" size="sm">
+                          PAYOUT
+                        </Badge>
+                      ) : (
+                        <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
+                          {item.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
+                        </Badge>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="font-semibold text-slate-800 truncate">{item.company_name}</span>
+                        {item.company_name === 'Uber Platform' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-black text-white text-xs font-bold">
+                            <span>UBER</span>
+                            <span className="font-normal text-[10px] text-emerald-400">Platform</span>
+                          </span>
+                        ) : (
+                          <>
+                            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-semibold text-slate-800 truncate">{item.company_name}</span>
+                          </>
+                        )}
                       </div>
                       {item.vehicle_reg && (
                         <div className="font-mono text-slate-700 font-semibold px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px]">

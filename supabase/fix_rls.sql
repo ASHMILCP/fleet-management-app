@@ -83,3 +83,20 @@ END $$;
 -- 10. Optional assigned_vehicle_id column on profiles table
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS assigned_vehicle_id UUID;
 
+-- 11. Create & enable full public access to uber_earnings table
+CREATE TABLE IF NOT EXISTS public.uber_earnings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    driver_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    vehicle_id UUID REFERENCES public.vehicles(id) ON DELETE SET NULL,
+    duty_session_id UUID REFERENCES public.duty_sessions(id) ON DELETE SET NULL,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    rides_count INT DEFAULT 1,
+    earnings_date DATE NOT NULL DEFAULT (timezone('Asia/Kolkata', now()))::date,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())
+);
+ALTER TABLE public.uber_earnings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public full access uber_earnings" ON public.uber_earnings;
+CREATE POLICY "Allow public full access uber_earnings" ON public.uber_earnings FOR ALL USING (true) WITH CHECK (true);
+
+

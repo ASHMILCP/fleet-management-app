@@ -35,6 +35,7 @@ export interface Company {
   phone?: string;
   email?: string;
   billing_rate_per_km?: number;
+  notes?: string;
   is_active: boolean;
   created_at: string;
 }
@@ -88,6 +89,21 @@ export interface FuelLog {
   vehicle?: Vehicle;
 }
 
+export interface UberEarning {
+  id: string;
+  driver_id: string;
+  vehicle_id?: string;
+  duty_session_id?: string | null;
+  amount: number;
+  rides_count?: number | null;
+  earnings_date: string; // YYYY-MM-DD
+  notes?: string;
+  created_at: string;
+  // joined fields
+  driver?: Profile;
+  vehicle?: Vehicle;
+}
+
 export interface DriverTodaySummary {
   dutySession: DutySession | null;
   startTime: string | null;
@@ -98,6 +114,10 @@ export interface DriverTodaySummary {
   totalKm: number;
   fuelExpense: number;
   fuelCostPerKm: number; // fuelExpense / totalKm
+  uberEarnings: number;
+  tripEarnings: number;
+  totalEarnings: number;
+  netEarnings: number;
 }
 
 export interface AdminSummaryMetrics {
@@ -108,6 +128,8 @@ export interface AdminSummaryMetrics {
   todayKm: number;
   todayFuelExpense: number;
   todayFuelCostPerKm: number;
+  todayUberEarnings?: number;
+  todayTotalEarnings?: number;
 }
 
 export interface ReportFilterCriteria {
