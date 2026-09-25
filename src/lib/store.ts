@@ -82,6 +82,50 @@ function generateUUID(): string {
   });
 }
 
+export function parseUberTrip(trip: any): UberEarning | null {
+  if (!trip) return null;
+  const rawNotes = trip.notes ? String(trip.notes) : '';
+  const isUberNote = rawNotes.includes('[UBER_EARNINGS:');
+  const compName = (trip.company?.company_name || trip.company?.name || '').toLowerCase();
+  const isUberComp = compName.includes('uber') || trip.company_id === '9047dffb-994d-459f-a221-334cb5296a38';
+
+  if (!isUberNote && !isUberComp) return null;
+
+  let amount = 0;
+  let rides_count: number | null = null;
+  let cleanNotes = rawNotes;
+
+  if (isUberNote) {
+    const match = rawNotes.match(/\[UBER_EARNINGS:(\{.*?\})\]/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        amount = Number(parsed.amount || 0);
+        rides_count = parsed.rides || null;
+        cleanNotes = parsed.notes || '';
+      } catch {
+        // fallback
+      }
+    }
+  }
+
+  if (amount <= 0) {
+    amount = Number(trip.earnings || trip.total_km || trip.entered_km || 0);
+  }
+
+  return {
+    id: trip.id,
+    driver_id: trip.driver_id,
+    vehicle_id: trip.vehicle_id,
+    duty_session_id: trip.duty_session_id,
+    amount: amount,
+    rides_count: rides_count || (Number(trip.entered_km) > 0 ? Number(trip.entered_km) : null),
+    earnings_date: trip.trip_date || (trip.created_at ? trip.created_at.split('T')[0] : getTodayDateIST()),
+    notes: cleanNotes || undefined,
+    created_at: trip.created_at || new Date().toISOString(),
+  };
+}
+
 export class FleetStore {
   // Current User Session
   static getCurrentUser(): Profile | null {
@@ -481,23 +525,63 @@ export class FleetStore {
         setItem(STORAGE_KEYS.FUEL_LOGS, mergedFuel);
       }
 
-      // 7. UBER EARNINGS SYNC & MERGE
+      // 7. UBER EARNINGS SYNC & MERGE (Dual cloud-persistence: trips table + uber_earnings table)
       const localUber = this.getUberEarnings();
+      let uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
+      const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
+      const cloudUberMap = new Map<string, UberEarning>();
+
+      // 7a. Parse Uber records from Supabase trips table
+      const tripsData = Array.isArray(tRes.data) ? tRes.data : [];
+      for (const t of tripsData) {
+        const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
+        if (isUber) {
+          const parsed = parseUberTrip(t);
+          if (parsed) cloudUberMap.set(parsed.id, parsed);
+        }
+      }
+
+      // 7b. Parse from uber_earnings table if present
       if (uRes && Array.isArray(uRes.data)) {
-        const cloudUber: UberEarning[] = uRes.data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          vehicle_id: row.vehicle_id,
-          duty_session_id: row.duty_session_id,
-          amount: Number(row.amount || 0),
-          rides_count: row.rides_count || null,
-          earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-          notes: row.notes,
-          created_at: row.created_at || new Date().toISOString(),
-        }));
-        const cloudUberIds = new Set(cloudUber.map((u) => u.id));
-        const unsyncedUber = localUber.filter((u) => !cloudUberIds.has(u.id));
-        for (const uu of unsyncedUber) {
+        for (const row of uRes.data) {
+          if (!row || !row.id) continue;
+          cloudUberMap.set(row.id, {
+            id: row.id,
+            driver_id: row.driver_id,
+            vehicle_id: row.vehicle_id,
+            duty_session_id: row.duty_session_id,
+            amount: Number(row.amount || 0),
+            rides_count: row.rides_count || null,
+            earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+            notes: row.notes,
+            created_at: row.created_at || new Date().toISOString(),
+          });
+        }
+      }
+
+      // 7c. Automatically upload any unsynced local Uber records to Supabase cloud
+      for (const uu of localUber) {
+        if (!cloudUberMap.has(uu.id)) {
+          // Push to Supabase trips under Uber Platform
+          supabase.from('trips').upsert({
+            id: uu.id,
+            driver_id: uu.driver_id,
+            company_id: uberCompId,
+            vehicle_id: uu.vehicle_id || null,
+            duty_session_id: uu.duty_session_id || null,
+            trip_date: uu.earnings_date || getTodayDateIST(),
+            trip_time: '20:00:00',
+            entered_km: uu.rides_count && uu.rides_count > 0 ? uu.rides_count : 1,
+            trip_type: 'ONE_SIDE',
+            km_multiplier: 1,
+            total_km: uu.rides_count && uu.rides_count > 0 ? uu.rides_count : 1,
+            notes: `[UBER_EARNINGS:{"amount":${uu.amount},"rides":${uu.rides_count || 1},"notes":${JSON.stringify(uu.notes || '')}}]`,
+          }).then(({ error }) => {
+            if (error) console.warn('Sync auto-upload to trips warning:', error.message);
+          });
+
+          // Also try upserting to uber_earnings table
           supabase.from('uber_earnings').upsert({
             id: uu.id,
             driver_id: uu.driver_id,
@@ -506,13 +590,14 @@ export class FleetStore {
             rides_count: uu.rides_count || null,
             earnings_date: uu.earnings_date || getTodayDateIST(),
             notes: uu.notes || null,
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading uber earning to Supabase:', error);
-          });
+          }).then(() => null, () => null);
+
+          cloudUberMap.set(uu.id, uu);
         }
-        const mergedUber = [...cloudUber, ...unsyncedUber];
-        setItem(STORAGE_KEYS.UBER_EARNINGS, mergedUber);
       }
+
+      const mergedUber = Array.from(cloudUberMap.values());
+      setItem(STORAGE_KEYS.UBER_EARNINGS, mergedUber);
 
       setItem(STORAGE_KEYS.INITIALIZED, 'true');
     } catch (err) {
@@ -1562,7 +1647,7 @@ export class FleetStore {
     return newFuel;
   }
 
-  // Uber Earnings (Cloud-First)
+  // Uber Earnings (Cloud-First with Dual-Layer Persistence)
   static getUberEarnings(): UberEarning[] {
     return getItem<UberEarning[]>(STORAGE_KEYS.UBER_EARNINGS, INITIAL_UBER_EARNINGS);
   }
@@ -1574,31 +1659,56 @@ export class FleetStore {
 
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from('uber_earnings')
-        .select('*')
-        .order('earnings_date', { ascending: false });
+      const [uRes, tRes, cRes] = await Promise.all([
+        supabase.from('uber_earnings').select('*').order('earnings_date', { ascending: false }).then((r) => r, () => ({ data: [] })),
+        supabase.from('trips').select('*').order('trip_date', { ascending: false }),
+        supabase.from('companies').select('id, company_name'),
+      ]);
 
-      if (error) {
-        console.warn('Supabase fetchUberEarningsAsync warning (using local):', error.message);
-        return this.getUberEarnings();
+      const uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
+      const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
+      const cloudMap = new Map<string, UberEarning>();
+
+      // 1. From trips table
+      if (Array.isArray(tRes.data)) {
+        for (const t of tRes.data) {
+          if (t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'))) {
+            const parsed = parseUberTrip(t);
+            if (parsed) cloudMap.set(parsed.id, parsed);
+          }
+        }
       }
 
-      if (data && Array.isArray(data)) {
-        const cloudUber: UberEarning[] = data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          vehicle_id: row.vehicle_id,
-          duty_session_id: row.duty_session_id,
-          amount: Number(row.amount || 0),
-          rides_count: row.rides_count || null,
-          earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-          notes: row.notes,
-          created_at: row.created_at || new Date().toISOString(),
-        }));
-        setItem(STORAGE_KEYS.UBER_EARNINGS, cloudUber);
-        return cloudUber;
+      // 2. From uber_earnings table
+      if (uRes && Array.isArray(uRes.data)) {
+        for (const row of uRes.data) {
+          if (!row || !row.id) continue;
+          cloudMap.set(row.id, {
+            id: row.id,
+            driver_id: row.driver_id,
+            vehicle_id: row.vehicle_id,
+            duty_session_id: row.duty_session_id,
+            amount: Number(row.amount || 0),
+            rides_count: row.rides_count || null,
+            earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+            notes: row.notes,
+            created_at: row.created_at || new Date().toISOString(),
+          });
+        }
       }
+
+      // 3. Merge with local storage
+      const localUber = this.getUberEarnings();
+      for (const u of localUber) {
+        if (!cloudMap.has(u.id)) {
+          cloudMap.set(u.id, u);
+        }
+      }
+
+      const merged = Array.from(cloudMap.values()).sort((a, b) => (b.earnings_date > a.earnings_date ? 1 : -1));
+      setItem(STORAGE_KEYS.UBER_EARNINGS, merged);
+      return merged;
     } catch (err) {
       console.warn('Supabase fetchUberEarningsAsync error:', err);
     }
@@ -1620,21 +1730,43 @@ export class FleetStore {
       try {
         const supabase = createClient();
 
-        // Ensure driver exists in drivers table
-        const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', newUber.driver_id).maybeSingle();
-        if (!drvCheck) {
-          const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', newUber.driver_id).maybeSingle();
-          if (!drvUserCheck) {
-            await supabase.from('drivers').insert({
-              id: newUber.driver_id,
-              user_id: newUber.driver_id,
-              driver_id_code: 'DRV-' + newUber.driver_id.slice(0, 6).toUpperCase(),
-              status: 'ACTIVE',
-            }).then(() => null, () => null);
-          }
+        // Ensure Uber Platform company exists in Supabase
+        let uberCompanyId = '9047dffb-994d-459f-a221-334cb5296a38';
+        const { data: compList } = await supabase.from('companies').select('id, company_name').ilike('company_name', '%uber%').limit(1);
+        if (compList && compList.length > 0) {
+          uberCompanyId = compList[0].id;
+        } else {
+          const { data: newComp } = await supabase.from('companies').insert({
+            id: uberCompanyId,
+            company_name: 'Uber Platform',
+            status: 'ACTIVE',
+            notes: 'UBER_PLATFORM',
+          }).select().single();
+          if (newComp) uberCompanyId = newComp.id;
         }
 
-        const { data, error } = await supabase.from('uber_earnings').insert({
+        // 1. Persist to trips table in Supabase (immediate cloud visibility across all devices)
+        const uberTripPayload = {
+          id: newUber.id,
+          driver_id: newUber.driver_id,
+          company_id: uberCompanyId,
+          vehicle_id: newUber.vehicle_id || null,
+          duty_session_id: newUber.duty_session_id || null,
+          trip_date: today,
+          trip_time: formatTimeIST(new Date()),
+          entered_km: newUber.rides_count && newUber.rides_count > 0 ? newUber.rides_count : 1,
+          trip_type: 'ONE_SIDE',
+          km_multiplier: 1,
+          total_km: newUber.rides_count && newUber.rides_count > 0 ? newUber.rides_count : 1,
+          notes: `[UBER_EARNINGS:{"amount":${newUber.amount},"rides":${newUber.rides_count || 1},"notes":${JSON.stringify(newUber.notes || '')}}]`,
+        };
+        const { error: tripError } = await supabase.from('trips').upsert(uberTripPayload);
+        if (tripError) {
+          console.warn('Supabase trips uber insert warning:', tripError.message);
+        }
+
+        // 2. Also try inserting into dedicated uber_earnings table if created
+        await supabase.from('uber_earnings').insert({
           id: newUber.id,
           driver_id: newUber.driver_id,
           vehicle_id: newUber.vehicle_id || null,
@@ -1643,20 +1775,14 @@ export class FleetStore {
           rides_count: newUber.rides_count || null,
           earnings_date: today,
           notes: newUber.notes || null,
-        }).select().single();
+        }).then(() => null, () => null);
 
-        if (error) {
-          console.warn('Supabase direct uber insert warning (saving locally):', error.message);
-        } else if (data) {
-          newUber.id = data.id;
-          newUber.created_at = data.created_at || newUber.created_at;
-        }
       } catch (cloudErr) {
         console.warn('Supabase addUberEarningAsync cloud exception:', cloudErr);
       }
     }
 
-    const all = this.getUberEarnings();
+    const all = this.getUberEarnings().filter((u) => u.id !== newUber.id);
     all.unshift(newUber);
     setItem(STORAGE_KEYS.UBER_EARNINGS, all);
     return newUber;
@@ -1682,7 +1808,10 @@ export class FleetStore {
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        await supabase.from('uber_earnings').delete().eq('id', id);
+        await Promise.all([
+          supabase.from('uber_earnings').delete().eq('id', id).then(() => null, () => null),
+          supabase.from('trips').delete().eq('id', id).then(() => null, () => null),
+        ]);
       } catch (err) {
         console.warn('Supabase deleteUberEarningAsync error:', err);
       }
@@ -1721,17 +1850,49 @@ export class FleetStore {
         const fuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
         const fuelCostPerKm = totalKm > 0 ? parseFloat((fuelExpense / totalKm).toFixed(2)) : 0;
 
-        // Uber Earnings Today
-        const cloudUber = Array.isArray(uRes.data) ? uRes.data : [];
+        // Uber Earnings Today (From trips + uber_earnings table + local storage)
+        const uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
+        const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
+        let uberEarningsToday = 0;
+        const seenTodayUber = new Set<string>();
+
+        // 1. From trips
+        const corporateTrips: any[] = [];
+        for (const t of trips) {
+          const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
+          if (isUber) {
+            seenTodayUber.add(t.id);
+            const parsed = parseUberTrip(t);
+            uberEarningsToday += (parsed?.amount || 0);
+          } else {
+            corporateTrips.push(t);
+          }
+        }
+
+        // 2. From uber_earnings table
+        if (uRes && Array.isArray(uRes.data)) {
+          for (const u of uRes.data) {
+            if (!seenTodayUber.has(u.id)) {
+              seenTodayUber.add(u.id);
+              uberEarningsToday += Number(u.amount || 0);
+            }
+          }
+        }
+
+        // 3. From local storage
         const localUberToday = this.getUberEarnings().filter((u) => u.driver_id === driverId && u.earnings_date === today);
-        const uberEarningsToday = cloudUber.length > 0
-          ? cloudUber.reduce((sum: number, u: any) => sum + Number(u.amount || 0), 0)
-          : localUberToday.reduce((sum: number, u: any) => sum + Number(u.amount || 0), 0);
+        for (const u of localUberToday) {
+          if (!seenTodayUber.has(u.id)) {
+            seenTodayUber.add(u.id);
+            uberEarningsToday += Number(u.amount || 0);
+          }
+        }
 
         // Corporate Trips Earnings Today
         const companies = Array.isArray(cRes.data) ? cRes.data : this.getCompanies();
         const companyMap = new Map(companies.map((c: any) => [c.id, c]));
-        const tripEarnings = trips.reduce((sum: number, t: any) => {
+        const tripEarnings = corporateTrips.reduce((sum: number, t: any) => {
           const comp = companyMap.get(t.company_id);
           let rate = 0;
           if (comp?.notes && !isNaN(parseFloat(comp.notes))) {
@@ -1879,15 +2040,47 @@ export class FleetStore {
         const todayFuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
         const todayFuelCostPerKm = todayKm > 0 ? parseFloat((todayFuelExpense / todayKm).toFixed(2)) : 0;
 
-        const cloudUber = Array.isArray(uRes.data) ? uRes.data : [];
+        const uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
+        const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
+        let todayUberEarnings = 0;
+        const seenTodayUber = new Set<string>();
+
+        // 1. From trips
+        const corporateTrips: any[] = [];
+        for (const t of trips) {
+          const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
+          if (isUber) {
+            seenTodayUber.add(t.id);
+            const parsed = parseUberTrip(t);
+            todayUberEarnings += (parsed?.amount || 0);
+          } else {
+            corporateTrips.push(t);
+          }
+        }
+
+        // 2. From uber_earnings table
+        if (uRes && Array.isArray(uRes.data)) {
+          for (const u of uRes.data) {
+            if (!seenTodayUber.has(u.id)) {
+              seenTodayUber.add(u.id);
+              todayUberEarnings += Number(u.amount || 0);
+            }
+          }
+        }
+
+        // 3. From local storage
         const localUberToday = this.getUberEarnings().filter((u) => u.earnings_date === today);
-        const todayUberEarnings = cloudUber.length > 0
-          ? cloudUber.reduce((sum: number, u: any) => sum + Number(u.amount || 0), 0)
-          : localUberToday.reduce((sum: number, u: any) => sum + Number(u.amount || 0), 0);
+        for (const u of localUberToday) {
+          if (!seenTodayUber.has(u.id)) {
+            seenTodayUber.add(u.id);
+            todayUberEarnings += Number(u.amount || 0);
+          }
+        }
 
         const companies = Array.isArray(cRes.data) ? cRes.data : this.getCompanies();
         const companyMap = new Map(companies.map((c: any) => [c.id, c]));
-        const todayTripEarnings = trips.reduce((sum: number, t: any) => {
+        const todayTripEarnings = corporateTrips.reduce((sum: number, t: any) => {
           const comp = companyMap.get(t.company_id);
           let rate = 0;
           if (comp?.notes && !isNaN(parseFloat(comp.notes))) {
@@ -1995,63 +2188,102 @@ export class FleetStore {
         const companyMap = new Map(companies.map((c: any) => [c.id, c]));
         const vehicleMap = new Map(vehicles.map((v: any) => [v.id, v]));
 
+        const uberComp = companies.find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
+        const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
         // Filter trips
         const filteredTrips = trips.filter((t: any) => {
           if (filters.startDate && t.trip_date < filters.startDate) return false;
           if (filters.endDate && t.trip_date > filters.endDate) return false;
           if (filters.driverId !== 'ALL' && t.driver_id !== filters.driverId) return false;
-          if (filters.companyId !== 'ALL' && (filters.companyId === 'UBER' || t.company_id !== filters.companyId)) return false;
+          if (filters.companyId !== 'ALL') {
+            const isUberTrip = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
+            if (filters.companyId === 'UBER' || filters.companyId === uberCompId) {
+              if (!isUberTrip) return false;
+            } else {
+              if (isUberTrip || t.company_id !== filters.companyId) return false;
+            }
+          }
           return true;
         });
 
         const assignedFuelDates = new Set<string>();
+        const seenUberIds = new Set<string>();
+        const items: DetailedReportItem[] = [];
 
-        const items: DetailedReportItem[] = filteredTrips.map((t: any) => {
+        for (const t of filteredTrips) {
+          const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
           const driver = driverMap.get(t.driver_id);
-          const company = companyMap.get(t.company_id);
           const vehicle = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
 
-          const dateKey = `${t.driver_id}_${t.trip_date}`;
-          let fuelOnDate = 0;
-          if (!assignedFuelDates.has(dateKey)) {
-            fuelOnDate = fuelLogs
-              .filter((f: any) => f.driver_id === t.driver_id && (f.expense_date === t.trip_date || f.log_date === t.trip_date))
-              .reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
-            assignedFuelDates.add(dateKey);
+          if (isUber) {
+            seenUberIds.add(t.id);
+            const parsed = parseUberTrip(t);
+            const amt = parsed?.amount || Number(t.entered_km || 0);
+
+            items.push({
+              id: `uber-${t.id}`,
+              trip_date: t.trip_date,
+              driver_name: driver?.name || driver?.full_name || 'Driver',
+              driver_phone: driver?.phone,
+              vehicle_reg: vehicle?.registration_number,
+              company_name: 'Uber Platform',
+              billing_rate_per_km: 0,
+              trip_type: 'ONE_SIDE',
+              one_side_km: 0,
+              multiplier: 1,
+              total_km: 0,
+              earnings: amt,
+              fuel_amount: 0,
+              fuel_cost_per_km: 0,
+              net_profit: amt,
+              created_at: t.created_at || new Date().toISOString(),
+              notes: parsed?.notes || (parsed?.rides_count ? `${parsed.rides_count} rides logged` : 'Uber Platform Earnings'),
+            });
+          } else {
+            const company = companyMap.get(t.company_id);
+            const dateKey = `${t.driver_id}_${t.trip_date}`;
+            let fuelOnDate = 0;
+            if (!assignedFuelDates.has(dateKey)) {
+              fuelOnDate = fuelLogs
+                .filter((f: any) => f.driver_id === t.driver_id && (f.expense_date === t.trip_date || f.log_date === t.trip_date))
+                .reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
+              assignedFuelDates.add(dateKey);
+            }
+
+            let ratePerKm = 0;
+            if (company?.notes && !isNaN(parseFloat(company.notes))) {
+              ratePerKm = parseFloat(company.notes);
+            } else if (company?.billing_rate_per_km !== undefined) {
+              ratePerKm = Number(company.billing_rate_per_km) || 0;
+            }
+
+            const totalKm = Number(t.total_km || 0);
+            const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
+            const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+            const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
+
+            items.push({
+              id: t.id,
+              trip_date: t.trip_date,
+              driver_name: driver?.name || driver?.full_name || 'Driver',
+              driver_phone: driver?.phone,
+              vehicle_reg: vehicle?.registration_number,
+              company_name: company?.company_name || company?.name || 'Client',
+              billing_rate_per_km: ratePerKm,
+              trip_type: t.trip_type || 'ONE_SIDE',
+              one_side_km: Number(t.entered_km || t.one_side_km || 0),
+              multiplier: Number(t.km_multiplier || (t.trip_type === 'TWO_SIDE' ? 1 : 2)),
+              total_km: totalKm,
+              earnings: earnings,
+              fuel_amount: fuelOnDate,
+              fuel_cost_per_km: fuelCostPerKm,
+              net_profit: netProfit,
+              created_at: t.created_at || new Date().toISOString(),
+              notes: t.notes,
+            });
           }
-
-          let ratePerKm = 0;
-          if (company?.notes && !isNaN(parseFloat(company.notes))) {
-            ratePerKm = parseFloat(company.notes);
-          } else if (company?.billing_rate_per_km !== undefined) {
-            ratePerKm = Number(company.billing_rate_per_km) || 0;
-          }
-
-          const totalKm = Number(t.total_km || 0);
-          const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
-          const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
-          const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
-
-          return {
-            id: t.id,
-            trip_date: t.trip_date,
-            driver_name: driver?.name || driver?.full_name || 'Driver',
-            driver_phone: driver?.phone,
-            vehicle_reg: vehicle?.registration_number,
-            company_name: company?.company_name || company?.name || 'Client',
-            billing_rate_per_km: ratePerKm,
-            trip_type: t.trip_type || 'ONE_SIDE',
-            one_side_km: Number(t.entered_km || t.one_side_km || 0),
-            multiplier: Number(t.km_multiplier || (t.trip_type === 'TWO_SIDE' ? 1 : 2)),
-            total_km: totalKm,
-            earnings: earnings,
-            fuel_amount: fuelOnDate,
-            fuel_cost_per_km: fuelCostPerKm,
-            net_profit: netProfit,
-            created_at: t.created_at || new Date().toISOString(),
-            notes: t.notes,
-          };
-        });
+        }
 
         // Also include standalone fuel expenses where driver had no trips on that day
         if (filters.companyId === 'ALL') {
@@ -2107,13 +2339,19 @@ export class FleetStore {
           });
         }
 
-        // Include Uber Platform earnings in detailed reports
-        if (filters.companyId === 'ALL' || filters.companyId === 'UBER') {
+        // Include any standalone Uber Platform earnings from uber_earnings table or local storage that were not already in trips
+        if (filters.companyId === 'ALL' || filters.companyId === 'UBER' || filters.companyId === uberCompId) {
           const cloudUber = Array.isArray(uRes.data) ? uRes.data : [];
           const localUber = this.getUberEarnings();
-          const allUber = cloudUber.length > 0 ? cloudUber : localUber;
+          const allUberMap = new Map<string, any>();
 
-          const filteredUber = allUber.filter((u: any) => {
+          for (const u of [...cloudUber, ...localUber]) {
+            if (u && u.id && !seenUberIds.has(u.id)) {
+              allUberMap.set(u.id, u);
+            }
+          }
+
+          const filteredUber = Array.from(allUberMap.values()).filter((u: any) => {
             const uDate = u.earnings_date || (u.created_at ? u.created_at.split('T')[0] : '');
             if (filters.startDate && uDate < filters.startDate) return false;
             if (filters.endDate && uDate > filters.endDate) return false;
@@ -2168,57 +2406,96 @@ export class FleetStore {
     const companyMap = new Map(companies.map((c) => [c.id, c]));
     const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
 
+    const uberComp = companies.find((c) => (c.name || '').toLowerCase().includes('uber'));
+    const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+
     // Filter trips
     const filteredTrips = trips.filter((t) => {
       if (filters.startDate && t.trip_date < filters.startDate) return false;
       if (filters.endDate && t.trip_date > filters.endDate) return false;
       if (filters.driverId !== 'ALL' && t.driver_id !== filters.driverId) return false;
-      if (filters.companyId !== 'ALL' && (filters.companyId === 'UBER' || t.company_id !== filters.companyId)) return false;
+      if (filters.companyId !== 'ALL') {
+        const isUberTrip = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
+        if (filters.companyId === 'UBER' || filters.companyId === uberCompId) {
+          if (!isUberTrip) return false;
+        } else {
+          if (isUberTrip || t.company_id !== filters.companyId) return false;
+        }
+      }
       return true;
     });
 
     const assignedFuelDates = new Set<string>();
+    const seenUberIds = new Set<string>();
+    const items: DetailedReportItem[] = [];
 
-    const items: DetailedReportItem[] = filteredTrips.map((t) => {
+    for (const t of filteredTrips) {
+      const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
       const driver = driverMap.get(t.driver_id);
-      const company = companyMap.get(t.company_id);
       const vehicle = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
 
-      const dateKey = `${t.driver_id}_${t.trip_date}`;
-      let fuelOnDate = 0;
-      if (!assignedFuelDates.has(dateKey)) {
-        fuelOnDate = fuelLogs
-          .filter((f) => f.driver_id === t.driver_id && f.log_date === t.trip_date)
-          .reduce((sum, f) => sum + Number(f.amount || 0), 0);
-        assignedFuelDates.add(dateKey);
+      if (isUber) {
+        seenUberIds.add(t.id);
+        const parsed = parseUberTrip(t);
+        const amt = parsed?.amount || Number(t.one_side_km || 0);
+
+        items.push({
+          id: `uber-${t.id}`,
+          trip_date: t.trip_date,
+          driver_name: driver?.full_name || 'Driver',
+          driver_phone: driver?.phone,
+          vehicle_reg: vehicle?.registration_number,
+          company_name: 'Uber Platform',
+          billing_rate_per_km: 0,
+          trip_type: 'ONE_SIDE',
+          one_side_km: 0,
+          multiplier: 1,
+          total_km: 0,
+          earnings: amt,
+          fuel_amount: 0,
+          fuel_cost_per_km: 0,
+          net_profit: amt,
+          created_at: t.created_at || new Date().toISOString(),
+          notes: parsed?.notes || (parsed?.rides_count ? `${parsed.rides_count} rides logged` : 'Uber Platform Earnings'),
+        });
+      } else {
+        const company = companyMap.get(t.company_id);
+        const dateKey = `${t.driver_id}_${t.trip_date}`;
+        let fuelOnDate = 0;
+        if (!assignedFuelDates.has(dateKey)) {
+          fuelOnDate = fuelLogs
+            .filter((f) => f.driver_id === t.driver_id && f.log_date === t.trip_date)
+            .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+          assignedFuelDates.add(dateKey);
+        }
+
+        const ratePerKm = Number(company?.billing_rate_per_km || 0);
+        const totalKm = Number(t.total_km || 0);
+        const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
+        const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+        const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
+
+        items.push({
+          id: t.id,
+          trip_date: t.trip_date,
+          driver_name: driver?.full_name || 'Unknown Driver',
+          driver_phone: driver?.phone,
+          vehicle_reg: vehicle?.registration_number,
+          company_name: company?.name || 'Unknown Company',
+          billing_rate_per_km: ratePerKm,
+          trip_type: t.trip_type,
+          one_side_km: Number(t.one_side_km),
+          multiplier: t.multiplier,
+          total_km: totalKm,
+          earnings: earnings,
+          fuel_amount: fuelOnDate,
+          fuel_cost_per_km: fuelCostPerKm,
+          net_profit: netProfit,
+          created_at: t.created_at,
+          notes: t.notes,
+        });
       }
-
-      const ratePerKm = Number(company?.billing_rate_per_km || 0);
-      const totalKm = Number(t.total_km || 0);
-      const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
-      const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
-      const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
-
-      return {
-        id: t.id,
-        trip_date: t.trip_date,
-        driver_name: driver?.full_name || 'Unknown Driver',
-        driver_phone: driver?.phone,
-        vehicle_reg: vehicle?.registration_number,
-        company_name: company?.name || 'Unknown Company',
-        billing_rate_per_km: ratePerKm,
-        trip_type: t.trip_type,
-        one_side_km: Number(t.one_side_km),
-        multiplier: t.multiplier,
-        total_km: totalKm,
-        earnings: earnings,
-        fuel_amount: fuelOnDate,
-        fuel_cost_per_km: fuelCostPerKm,
-        net_profit: netProfit,
-        created_at: t.created_at,
-        notes: t.notes,
-      };
-    });
+    }
 
     // Also include fuel expenses where driver had no trips on that day
     if (filters.companyId === 'ALL') {
@@ -2273,9 +2550,10 @@ export class FleetStore {
     }
 
     // Include Uber Platform earnings
-    if (filters.companyId === 'ALL' || filters.companyId === 'UBER') {
+    if (filters.companyId === 'ALL' || filters.companyId === 'UBER' || filters.companyId === uberCompId) {
       const allUber = this.getUberEarnings();
       const filteredUber = allUber.filter((u) => {
+        if (seenUberIds.has(u.id)) return false;
         const uDate = u.earnings_date || (u.created_at ? u.created_at.split('T')[0] : '');
         if (filters.startDate && uDate < filters.startDate) return false;
         if (filters.endDate && uDate > filters.endDate) return false;

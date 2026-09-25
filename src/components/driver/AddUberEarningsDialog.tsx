@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/Button';
 import { Car, IndianRupee, Calendar, Hash, FileText, CheckCircle, TrendingUp, Sparkles } from 'lucide-react';
 
 interface AddUberEarningsDialogProps {
-  driverId: string;
+  driverId?: string;
   isOpen: boolean;
   onClose: () => void;
   onUberEarningAdded?: () => void;
+  initialDate?: string;
 }
 
 export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
@@ -19,12 +20,29 @@ export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
   isOpen,
   onClose,
   onUberEarningAdded,
+  initialDate,
 }) => {
+  const drivers = FleetStore.getDrivers();
+  const [selectedDriverId, setSelectedDriverId] = useState<string>(driverId || (drivers[0]?.id || ''));
   const [amount, setAmount] = useState<string>('');
   const [ridesCount, setRidesCount] = useState<string>('');
-  const [date, setDate] = useState<string>(getTodayDateIST());
+  const [date, setDate] = useState<string>(initialDate || getTodayDateIST());
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    if (driverId) {
+      setSelectedDriverId(driverId);
+    } else if (drivers.length > 0 && !selectedDriverId) {
+      setSelectedDriverId(drivers[0].id);
+    }
+  }, [driverId, drivers, isOpen]);
+
+  React.useEffect(() => {
+    if (initialDate) {
+      setDate(initialDate);
+    }
+  }, [initialDate, isOpen]);
 
   const quickAmounts = [500, 1000, 1500, 2000, 2500, 3000];
 
@@ -45,21 +63,27 @@ export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
       return;
     }
 
+    const effectiveDriverId = driverId || selectedDriverId;
+    if (!effectiveDriverId) {
+      alert('Please select a driver to credit the Uber earnings');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const activeDuty = FleetStore.getActiveDutySession(driverId);
+      const activeDuty = FleetStore.getActiveDutySession(effectiveDriverId);
       const driver = FleetStore.getCurrentUser();
-      const driverFromList = FleetStore.getDrivers().find((d) => d.id === driverId);
+      const driverFromList = FleetStore.getDrivers().find((d) => d.id === effectiveDriverId);
       const vehicleId =
         activeDuty?.vehicle_id ||
-        driver?.assigned_vehicle_id ||
+        (driver?.id === effectiveDriverId ? driver?.assigned_vehicle_id : undefined) ||
         driverFromList?.assigned_vehicle_id ||
         undefined;
 
       const parsedRides = ridesCount ? parseInt(ridesCount, 10) : null;
 
       await FleetStore.addUberEarningAsync({
-        driver_id: driverId,
+        driver_id: effectiveDriverId,
         vehicle_id: vehicleId,
         duty_session_id: activeDuty?.id || null,
         amount: parsedAmount,
@@ -91,7 +115,7 @@ export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Add Uber Earnings"
-      subtitle="Log your daily Uber platform payout & completed rides"
+      subtitle="Log daily Uber platform payout & completed rides (Instant Cloud Sync)"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* PLATFORM BADGE HEADER */}
@@ -108,11 +132,32 @@ export const AddUberEarningsDialog: React.FC<AddUberEarningsDialogProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Syncs directly with fleet management &amp; admin reporting
+                Syncs directly with Supabase cloud &amp; reflects across Admin &amp; Driver devices
               </p>
             </div>
           </div>
         </div>
+
+        {/* DRIVER SELECT (For Admin Portal) */}
+        {!driverId && (
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider">
+              Assign to Driver <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={selectedDriverId}
+              onChange={(e) => setSelectedDriverId(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              required
+            >
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.full_name} {d.username ? `(@${d.username})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* AMOUNT (₹) */}
         <div>

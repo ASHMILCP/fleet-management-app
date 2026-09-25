@@ -18,6 +18,7 @@ import { subscribeToDutyNotifications } from '@/lib/notifications';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import {
   FileSpreadsheet,
   Download,
@@ -62,6 +63,7 @@ export default function AdminReportsPage() {
 
   // Password visibility map for driver credentials inspection
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [isUberDialogOpen, setIsUberDialogOpen] = useState<boolean>(false);
 
   // Report datasets
   const [reportItems, setReportItems] = useState<DetailedReportItem[]>([]);
@@ -318,6 +320,16 @@ export default function AdminReportsPage() {
           >
             Excel
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsUberDialogOpen(true)}
+            className="border-emerald-300 text-emerald-700 bg-emerald-50/70 hover:bg-emerald-100 hover:text-emerald-800 font-bold"
+            leftIcon={<Car className="w-4 h-4 text-emerald-600" />}
+          >
+            + Log Uber
+          </Button>
+
           <Button
             variant="primary"
             size="sm"
@@ -1450,6 +1462,17 @@ export default function AdminReportsPage() {
           </Card>
         </div>
       )}
+
+      {/* UBER EARNINGS LOGGING MODAL FOR ADMIN */}
+      <AddUberEarningsDialog
+        isOpen={isUberDialogOpen}
+        onClose={() => setIsUberDialogOpen(false)}
+        driverId={selectedDriverId !== 'ALL' ? selectedDriverId : undefined}
+        initialDate={endDate || today}
+        onUberEarningAdded={() => {
+          refreshReportData();
+        }}
+      />
     </div>
   );
 }
