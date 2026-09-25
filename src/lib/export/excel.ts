@@ -12,6 +12,7 @@ export function exportToExcel(items: DetailedReportItem[], filename: string = 'f
     const rate = item.billing_rate_per_km || 0;
     const earnings = item.earnings || 0;
     const net = item.net_profit ?? (earnings - item.fuel_amount);
+    const kmCost = item.total_km > 0 && item.fuel_amount > 0 ? (item.fuel_amount / item.total_km).toFixed(2) : '0.00';
     return {
       'Trip Date': item.trip_date,
       'Driver Name': item.driver_name,
@@ -25,6 +26,7 @@ export function exportToExcel(items: DetailedReportItem[], filename: string = 'f
       'Rate/KM (₹)': rate,
       'Gross Earnings (₹)': earnings,
       'Fuel Amount (₹)': item.fuel_amount,
+      'Fuel Cost/KM (₹)': kmCost,
       'Net Profit (₹)': net,
       'Notes': item.notes || '',
     };
@@ -50,6 +52,7 @@ export function exportToExcel(items: DetailedReportItem[], filename: string = 'f
     'Rate/KM (₹)': '' as any,
     'Gross Earnings (₹)': totalEarnings as any,
     'Fuel Amount (₹)': totalFuel as any,
+    'Fuel Cost/KM (₹)': costPerKm as any,
     'Net Profit (₹)': totalNet as any,
     'Notes': `Fleet Avg Cost: ₹${costPerKm}/KM`,
   });
@@ -70,6 +73,7 @@ export function exportToExcel(items: DetailedReportItem[], filename: string = 'f
     { wch: 14 }, // Rate/KM
     { wch: 18 }, // Gross Earnings
     { wch: 16 }, // Fuel Amount (₹)
+    { wch: 16 }, // Fuel Cost/KM (₹)
     { wch: 16 }, // Net Profit (₹)
     { wch: 30 }, // Notes
   ];

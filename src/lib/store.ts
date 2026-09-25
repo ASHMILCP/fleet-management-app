@@ -2030,6 +2030,7 @@ export class FleetStore {
           const totalKm = Number(t.total_km || 0);
           const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
           const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+          const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
 
           return {
             id: t.id,
@@ -2045,6 +2046,7 @@ export class FleetStore {
             total_km: totalKm,
             earnings: earnings,
             fuel_amount: fuelOnDate,
+            fuel_cost_per_km: fuelCostPerKm,
             net_profit: netProfit,
             created_at: t.created_at || new Date().toISOString(),
             notes: t.notes,
@@ -2097,6 +2099,7 @@ export class FleetStore {
               total_km: 0,
               earnings: 0,
               fuel_amount: entry.amount,
+              fuel_cost_per_km: 0,
               net_profit: -entry.amount,
               created_at: entry.log_date + 'T12:00:00.000Z',
               notes: entry.notes || 'Fuel Purchase',
@@ -2136,6 +2139,7 @@ export class FleetStore {
               total_km: 0,
               earnings: amt,
               fuel_amount: 0,
+              fuel_cost_per_km: 0,
               net_profit: amt,
               created_at: u.created_at || new Date().toISOString(),
               notes: u.notes || (u.rides_count ? `${u.rides_count} rides logged` : 'Uber Platform Earnings'),
@@ -2193,6 +2197,7 @@ export class FleetStore {
       const totalKm = Number(t.total_km || 0);
       const earnings = parseFloat((totalKm * ratePerKm).toFixed(2));
       const netProfit = parseFloat((earnings - fuelOnDate).toFixed(2));
+      const fuelCostPerKm = totalKm > 0 && fuelOnDate > 0 ? parseFloat((fuelOnDate / totalKm).toFixed(2)) : 0;
 
       return {
         id: t.id,
@@ -2208,6 +2213,7 @@ export class FleetStore {
         total_km: totalKm,
         earnings: earnings,
         fuel_amount: fuelOnDate,
+        fuel_cost_per_km: fuelCostPerKm,
         net_profit: netProfit,
         created_at: t.created_at,
         notes: t.notes,
@@ -2258,6 +2264,7 @@ export class FleetStore {
           total_km: 0,
           earnings: 0,
           fuel_amount: entry.amount,
+          fuel_cost_per_km: 0,
           net_profit: -entry.amount,
           created_at: entry.log_date + 'T12:00:00.000Z',
           notes: entry.notes || 'Fuel Purchase',
@@ -2294,6 +2301,7 @@ export class FleetStore {
           total_km: 0,
           earnings: amt,
           fuel_amount: 0,
+          fuel_cost_per_km: 0,
           net_profit: amt,
           created_at: u.created_at || new Date().toISOString(),
           notes: u.notes || (u.rides_count ? `${u.rides_count} rides logged` : 'Uber Platform Earnings'),

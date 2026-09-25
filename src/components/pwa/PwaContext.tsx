@@ -88,7 +88,7 @@ export const PwaProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('appinstalled', handleAppInstalled);
 
     // Register Service Worker
-    if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'development') {
+    if ('serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {

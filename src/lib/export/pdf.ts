@@ -46,19 +46,21 @@ export function exportToPDF(
   doc.setFillColor(248, 250, 252);
   doc.roundedRect(40, 70, 762, 45, 4, 4, 'FD');
 
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42); // Slate 900
   doc.text(`Total Records: ${items.length}`, 50, 97);
-  doc.text(`Distance: ${totalKm.toFixed(1)} KM`, 170, 97);
-  doc.text(`Gross Earnings: ₹${totalEarnings.toFixed(2)}`, 310, 97);
-  doc.text(`Fuel: ₹${totalFuel.toFixed(2)}`, 480, 97);
-  doc.text(`Net Profit: ₹${totalNet.toFixed(2)}`, 610, 97);
+  doc.text(`Distance: ${totalKm.toFixed(1)} KM`, 160, 97);
+  doc.text(`Gross Earnings: ₹${totalEarnings.toFixed(2)}`, 290, 97);
+  doc.text(`Fuel: ₹${totalFuel.toFixed(2)}`, 440, 97);
+  doc.text(`Avg KM Cost: ₹${costPerKm}/KM`, 550, 97);
+  doc.text(`Net Profit: ₹${totalNet.toFixed(2)}`, 680, 97);
 
   // Prepare table data
   const tableData = items.map((item) => {
     const rate = item.billing_rate_per_km || 0;
     const earnings = item.earnings || 0;
     const net = item.net_profit ?? (earnings - item.fuel_amount);
+    const kmCost = item.total_km > 0 && item.fuel_amount > 0 ? `₹${(item.fuel_amount / item.total_km).toFixed(2)}` : '-';
     return [
       item.trip_date,
       item.driver_name,
@@ -71,6 +73,7 @@ export function exportToPDF(
       rate > 0 ? `₹${rate}` : '-',
       `₹${earnings.toFixed(2)}`,
       `₹${item.fuel_amount.toFixed(2)}`,
+      kmCost,
       `₹${net.toFixed(2)}`,
       item.notes || '-',
     ];
@@ -89,8 +92,9 @@ export function exportToPDF(
     '',
     `₹${totalEarnings.toFixed(2)}`,
     `₹${totalFuel.toFixed(2)}`,
+    `₹${costPerKm}/km`,
     `₹${totalNet.toFixed(2)}`,
-    `Avg: ₹${costPerKm}/KM`,
+    `Fleet Avg: ₹${costPerKm}/KM`,
   ]);
 
   autoTable(doc, {
@@ -108,6 +112,7 @@ export function exportToPDF(
         'Rate/KM',
         'Gross (₹)',
         'Fuel (₹)',
+        'Cost/KM',
         'Net (₹)',
         'Notes',
       ],

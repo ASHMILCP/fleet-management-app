@@ -20,6 +20,7 @@ export function exportToCSV(items: DetailedReportItem[], filename: string = 'fle
     'Rate/KM (₹)',
     'Gross Earnings (₹)',
     'Fuel Amount (₹)',
+    'KM Cost (₹/km)',
     'Net Profit (₹)',
     'Notes',
   ];
@@ -28,6 +29,7 @@ export function exportToCSV(items: DetailedReportItem[], filename: string = 'fle
     const rate = item.billing_rate_per_km || 0;
     const earnings = item.earnings || 0;
     const net = item.net_profit ?? (earnings - item.fuel_amount);
+    const kmCost = item.total_km > 0 && item.fuel_amount > 0 ? (item.fuel_amount / item.total_km).toFixed(2) : '0.00';
     return [
       item.trip_date,
       `"${item.driver_name.replace(/"/g, '""')}"`,
@@ -41,6 +43,7 @@ export function exportToCSV(items: DetailedReportItem[], filename: string = 'fle
       rate,
       earnings.toFixed(2),
       item.fuel_amount.toFixed(2),
+      kmCost,
       net.toFixed(2),
       `"${(item.notes || '').replace(/"/g, '""')}"`,
     ];
@@ -51,6 +54,7 @@ export function exportToCSV(items: DetailedReportItem[], filename: string = 'fle
   const totalEarnings = items.reduce((sum, item) => sum + (item.earnings || 0), 0);
   const totalFuel = items.reduce((sum, item) => sum + item.fuel_amount, 0);
   const totalNet = totalEarnings - totalFuel;
+  const avgCostPerKm = totalKm > 0 ? (totalFuel / totalKm).toFixed(2) : '0.00';
 
   const totalRow = [
     'TOTAL',
@@ -65,6 +69,7 @@ export function exportToCSV(items: DetailedReportItem[], filename: string = 'fle
     '',
     totalEarnings.toFixed(2),
     totalFuel.toFixed(2),
+    avgCostPerKm,
     totalNet.toFixed(2),
     '',
   ];

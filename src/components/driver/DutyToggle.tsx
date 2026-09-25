@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Play, Square, Clock, Car, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { broadcastDutyNotification } from '@/lib/notifications';
 
 interface DutyToggleProps {
   driverId: string;
@@ -74,8 +75,25 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
   const handleStartDuty = async () => {
     setIsSubmitting(true);
     try {
-      await FleetStore.startDutyAsync(driverId, selectedVehicleId || undefined, startNotes);
+      const session = await FleetStore.startDutyAsync(driverId, selectedVehicleId || undefined, startNotes);
       setIsStartModalOpen(false);
+
+      // Broadcast notification to Admin phone & app
+      const driver = FleetStore.getDrivers().find((d) => d.id === driverId) || FleetStore.getCurrentUser();
+      const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+      await broadcastDutyNotification({
+        id: `duty-start-${session?.id || Date.now()}`,
+        type: 'DUTY_STARTED',
+        driver_id: driverId,
+        driver_name: driver?.full_name || 'Driver',
+        driver_username: driver?.username,
+        driver_phone: driver?.phone,
+        vehicle_reg: vehicle?.registration_number,
+        session_id: session?.id,
+        timestamp: session?.start_time || new Date().toISOString(),
+        notes: startNotes || undefined,
+      });
+
       setStartNotes('');
       await loadDutyState();
       if (onDutyChanged) onDutyChanged();
@@ -89,8 +107,28 @@ export const DutyToggle: React.FC<DutyToggleProps> = ({ driverId, onDutyChanged 
   const handleEndDuty = async () => {
     setIsSubmitting(true);
     try {
+      const driver = FleetStore.getDrivers().find((d) => d.id === driverId) || FleetStore.getCurrentUser();
+      const vehicle = vehicles.find((v) => v.id === activeSession?.vehicle_id);
+      const finishedDuration = elapsedTime;
+      const endTimestamp = new Date().toISOString();
+
       await FleetStore.endDutyAsync(driverId);
       setIsEndModalOpen(false);
+
+      // Broadcast notification to Admin phone & app
+      await broadcastDutyNotification({
+        id: `duty-end-${activeSession?.id || Date.now()}-${Date.now()}`,
+        type: 'DUTY_ENDED',
+        driver_id: driverId,
+        driver_name: driver?.full_name || 'Driver',
+        driver_username: driver?.username,
+        driver_phone: driver?.phone,
+        vehicle_reg: vehicle?.registration_number,
+        session_id: activeSession?.id,
+        timestamp: endTimestamp,
+        duration_text: finishedDuration,
+      });
+
       await loadDutyState();
       if (onDutyChanged) onDutyChanged();
     } catch (err: any) {

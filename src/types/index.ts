@@ -153,6 +153,7 @@ export interface DetailedReportItem {
   billing_rate_per_km: number;
   earnings: number;
   fuel_amount: number;
+  fuel_cost_per_km?: number; // fuel_amount / total_km
   net_profit?: number;
   created_at: string;
   notes?: string;
@@ -190,4 +191,20 @@ export interface LoginAuditItem {
   ip_address?: string;
   phone?: string;
 }
+
+export interface DutyNotification {
+  id: string;
+  type: 'DUTY_STARTED' | 'DUTY_ENDED';
+  driver_id: string;
+  driver_name: string;
+  driver_username?: string;
+  driver_phone?: string;
+  vehicle_reg?: string;
+  session_id?: string;
+  timestamp: string;
+  duration_text?: string;
+  notes?: string;
+  read?: boolean;
+}
+
 

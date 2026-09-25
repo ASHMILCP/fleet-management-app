@@ -27,6 +27,7 @@ import {
 import { Badge } from '@/components/ui/Badge';
 import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
 import { usePwa } from '@/components/pwa/PwaContext';
+import { NotificationBell, NotificationToastContainer } from '@/components/notifications/NotificationManager';
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
@@ -73,6 +74,7 @@ export const Navbar: React.FC = () => {
 
   return (
     <nav className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+      {isAdmin && <NotificationToastContainer />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-8">
@@ -146,6 +148,9 @@ export const Navbar: React.FC = () => {
               </button>
             )}
 
+            {/* NOTIFICATION BELL FOR ADMIN */}
+            {isAdmin && <NotificationBell />}
+
             {/* ADMIN CREDENTIALS BUTTON */}
             {isAdmin && (
               <button
@@ -171,6 +176,9 @@ export const Navbar: React.FC = () => {
 
           {/* MOBILE MENU TOGGLE & QUICK INSTALL */}
           <div className="flex md:hidden items-center gap-2">
+            {/* MOBILE NOTIFICATION BELL */}
+            {isAdmin && <NotificationBell />}
+
             {!isInstalled && (
               <button
                 onClick={openInstallModal}

@@ -14,6 +14,7 @@ import { getTodayDateIST, formatDateIST, formatDateTimeIST, formatCurrencyINR } 
 import { exportToExcel, exportWorkingHoursToExcel, exportLoginDetailsToExcel } from '@/lib/export/excel';
 import { exportToCSV, exportWorkingHoursToCSV, exportLoginDetailsToCSV } from '@/lib/export/csv';
 import { exportToPDF, exportWorkingHoursToPDF, exportLoginDetailsToPDF } from '@/lib/export/pdf';
+import { subscribeToDutyNotifications } from '@/lib/notifications';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -39,6 +40,7 @@ import {
   Sparkles,
   ShieldCheck,
   Phone,
+  Fuel,
 } from 'lucide-react';
 
 export default function AdminReportsPage() {
@@ -110,12 +112,18 @@ export default function AdminReportsPage() {
   useEffect(() => {
     refreshReportData();
 
+    // Live refresh when a driver starts or ends session
+    const unsubscribeDuty = subscribeToDutyNotifications(() => {
+      refreshReportData();
+    });
+
     // Auto refresh every 20 seconds
     const interval = setInterval(refreshReportData, 20000);
     const handleFocus = () => refreshReportData();
     window.addEventListener('focus', handleFocus);
 
     return () => {
+      unsubscribeDuty();
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
@@ -469,6 +477,15 @@ export default function AdminReportsPage() {
                 </span>
               </div>
 
+              <div className="h-6 w-px bg-slate-700"></div>
+
+              <div>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Avg KM Cost</span>
+                <span className="font-mono font-bold text-amber-300 text-sm">
+                  ₹{avgCostPerKm.toFixed(2)}/km
+                </span>
+              </div>
+
               <button
                 onClick={() => setSelectedDriverId('ALL')}
                 className="ml-auto px-2.5 py-1 text-[11px] rounded-lg bg-slate-700 text-slate-300 hover:text-white hover:bg-slate-600 transition-colors"
@@ -585,7 +602,7 @@ export default function AdminReportsPage() {
 
       {/* 5. DYNAMIC METRICS STRIP BASED ON ACTIVE TAB */}
       {activeTab === 'trips' && (
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-4">
           <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
             <div className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase">Filtered Trips</div>
             <div className="text-xl sm:text-2xl font-black text-slate-900 font-mono mt-1">
@@ -625,8 +642,21 @@ export default function AdminReportsPage() {
             <div className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1 truncate">Fuel expenditure</div>
           </div>
 
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-amber-300 shadow-xs bg-amber-50/30">
+            <div className="text-[11px] sm:text-xs font-bold text-amber-700 uppercase flex items-center gap-1">
+              <Fuel className="w-3.5 h-3.5 text-amber-600" />
+              <span>Fuel Cost / KM</span>
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-amber-950 font-mono mt-1 truncate">
+              ₹{avgCostPerKm.toFixed(2)} <span className="text-xs sm:text-sm font-semibold text-slate-500">/KM</span>
+            </div>
+            <div className="text-[10px] sm:text-[11px] text-amber-700 mt-0.5 sm:mt-1 truncate">
+              Fuel ÷ Total distance
+            </div>
+          </div>
+
           <div
-            className={`p-3.5 sm:p-4 rounded-2xl border shadow-xs col-span-2 sm:col-span-1 ${
+            className={`p-3.5 sm:p-4 rounded-2xl border shadow-xs ${
               netProfit >= 0 ? 'border-indigo-200 bg-indigo-50/30' : 'border-rose-200 bg-rose-50/30'
             }`}
           >
@@ -804,6 +834,7 @@ export default function AdminReportsPage() {
                       <th className="py-3.5 px-4 text-right">Rate/KM</th>
                       <th className="py-3.5 px-4 text-right">Earnings</th>
                       <th className="py-3.5 px-4 text-right">Fuel (₹)</th>
+                      <th className="py-3.5 px-4 text-right">KM Cost</th>
                       <th className="py-3.5 px-4 text-right">Net Profit</th>
                       <th className="py-3.5 px-4">Notes</th>
                     </tr>
@@ -862,6 +893,11 @@ export default function AdminReportsPage() {
                         <td className="py-3.5 px-4 text-right font-mono font-semibold text-amber-700">
                           {item.fuel_amount > 0 ? formatCurrencyINR(item.fuel_amount) : '-'}
                         </td>
+                        <td className="py-3.5 px-4 text-right font-mono font-bold text-amber-800">
+                          {item.total_km > 0 && item.fuel_amount > 0
+                            ? `₹${(item.fuel_amount / item.total_km).toFixed(2)}/km`
+                            : '-'}
+                        </td>
                         <td
                           className={`py-3.5 px-4 text-right font-mono font-bold ${
                             (item.net_profit ?? (item.earnings - item.fuel_amount)) >= 0
@@ -881,7 +917,7 @@ export default function AdminReportsPage() {
                     <tr>
                       <td className="py-3.5 px-4 uppercase text-xs">Total Summary</td>
                       <td colSpan={6} className="py-3.5 px-4 text-xs text-slate-500">
-                        {reportItems.length} records &bull; Avg Fuel Cost: ₹{avgCostPerKm.toFixed(2)}/KM
+                        {reportItems.length} records &bull; Fleet Avg Fuel Cost: ₹{avgCostPerKm.toFixed(2)}/KM
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono text-sm font-black">
                         {totalKm.toFixed(1)} km
@@ -892,6 +928,9 @@ export default function AdminReportsPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono text-sm font-black text-amber-700">
                         {formatCurrencyINR(totalFuel)}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono text-sm font-black text-amber-800">
+                        ₹{avgCostPerKm.toFixed(2)}/km
                       </td>
                       <td
                         className={`py-3.5 px-4 text-right font-mono text-sm font-black ${
@@ -957,7 +996,7 @@ export default function AdminReportsPage() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                       <div className="bg-slate-50 p-2 rounded-xl text-center border border-slate-100">
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Distance</span>
                         <span className="font-mono font-bold text-slate-800">{item.total_km} km</span>
@@ -972,9 +1011,17 @@ export default function AdminReportsPage() {
                         </span>
                       </div>
                       <div className="bg-slate-50 p-2 rounded-xl text-center border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Fuel</span>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Fuel Spent</span>
                         <span className="font-mono font-bold text-amber-700">
                           {item.fuel_amount > 0 ? formatCurrencyINR(item.fuel_amount) : '₹0'}
+                        </span>
+                      </div>
+                      <div className="bg-amber-50/50 p-2 rounded-xl text-center border border-amber-200/60">
+                        <span className="text-[10px] uppercase font-bold text-amber-700 block">KM Cost</span>
+                        <span className="font-mono font-bold text-amber-800">
+                          {item.total_km > 0 && item.fuel_amount > 0
+                            ? `₹${(item.fuel_amount / item.total_km).toFixed(2)}/km`
+                            : '-'}
                         </span>
                       </div>
                     </div>

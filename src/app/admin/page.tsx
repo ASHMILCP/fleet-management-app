@@ -28,6 +28,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
+import { subscribeToDutyNotifications } from '@/lib/notifications';
 
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState<AdminSummaryMetrics>({
@@ -68,12 +69,18 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadDashboardData();
 
+    // Live instant refresh when driver starts or ends session
+    const unsubscribeDuty = subscribeToDutyNotifications(() => {
+      loadDashboardData();
+    });
+
     // Auto-refresh every 15s so driver entries from mobile reflect automatically
     const interval = setInterval(loadDashboardData, 15000);
     const handleFocus = () => loadDashboardData();
     window.addEventListener('focus', handleFocus);
 
     return () => {
+      unsubscribeDuty();
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
