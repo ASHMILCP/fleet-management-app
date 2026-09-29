@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { FleetStore } from '@/lib/store';
-import { AdminSummaryMetrics, DutySession, Profile, Vehicle } from '@/types';
+import { AdminSummaryMetrics, DutySession, Profile, Vehicle, Company, Trip, DetailedReportItem } from '@/types';
 import { formatTimeIST, formatCurrencyINR, getTodayDateIST } from '@/lib/timezone';
 import { StatCard } from '@/components/admin/StatCard';
 import { Card } from '@/components/ui/Card';
@@ -26,8 +26,11 @@ import {
   AlertCircle,
   RefreshCw,
   KeyRound,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
+import { EditTripModal } from '@/components/admin/EditTripModal';
 import { subscribeToDutyNotifications } from '@/lib/notifications';
 
 export default function AdminDashboard() {
@@ -43,22 +46,32 @@ export default function AdminDashboard() {
   const [activeSessions, setActiveSessions] = useState<DutySession[]>([]);
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isEditTripOpen, setIsEditTripOpen] = useState(false);
+  const [editingTripReportItem, setEditingTripReportItem] = useState<DetailedReportItem | null>(null);
 
   const loadDashboardData = async () => {
     setIsRefreshing(true);
     try {
       await FleetStore.syncWithSupabase();
-      const [data, allSessions] = await Promise.all([
+      const [data, allSessions, allTrips] = await Promise.all([
         FleetStore.fetchAdminMetricsAsync(),
         FleetStore.fetchDutySessionsAsync(),
+        FleetStore.fetchTripsAsync(),
       ]);
       setMetrics(data);
       setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE' || !s.end_time));
 
+      const today = getTodayDateIST();
+      const tripsToday = allTrips.filter((t) => t.trip_date === today);
+      setTodayTrips(tripsToday);
+
       setDrivers(FleetStore.getDrivers());
       setVehicles(FleetStore.getVehicles());
+      setCompanies(FleetStore.getCompanies());
     } catch (err) {
       console.error('Error loading admin dashboard data:', err);
     } finally {
@@ -88,6 +101,37 @@ export default function AdminDashboard() {
 
   const driverMap = new Map(drivers.map((d) => [d.id, d]));
   const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
+  const companyMap = new Map(companies.map((c) => [c.id, c]));
+
+  const handleOpenEditTrip = (trip: Trip) => {
+    const driver = driverMap.get(trip.driver_id);
+    const company = companyMap.get(trip.company_id);
+    const vehicle = trip.vehicle_id ? vehicleMap.get(trip.vehicle_id) : undefined;
+    const rate = company?.billing_rate_per_km || 0;
+    const earnings = parseFloat((trip.total_km * rate).toFixed(2));
+
+    setEditingTripReportItem({
+      id: trip.id,
+      driver_id: trip.driver_id,
+      company_id: trip.company_id,
+      vehicle_id: trip.vehicle_id,
+      trip_date: trip.trip_date,
+      driver_name: driver?.full_name || 'Driver',
+      driver_phone: driver?.phone,
+      vehicle_reg: vehicle?.registration_number,
+      company_name: company?.name || 'Company',
+      trip_type: trip.trip_type,
+      one_side_km: trip.one_side_km,
+      multiplier: trip.multiplier,
+      total_km: trip.total_km,
+      billing_rate_per_km: rate,
+      earnings: earnings,
+      fuel_amount: 0,
+      created_at: trip.created_at,
+      notes: trip.notes,
+    });
+    setIsEditTripOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -378,10 +422,121 @@ export default function AdminDashboard() {
           </Card>
         </div>
       </div>
+
+      {/* 4. TODAY'S DRIVER ENTRIES SECTION */}
+      <Card
+        title={
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <Navigation className="w-5 h-5 text-blue-600" />
+              <span className="font-bold text-slate-900">
+                Today&apos;s Logged Driver Entries ({todayTrips.length})
+              </span>
+            </div>
+          </div>
+        }
+        subtitle="Review, edit, or reassign driver entries logged today across the fleet"
+        action={
+          <Link
+            href="/admin/reports"
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+          >
+            <span>View All in Reports</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        }
+      >
+        {todayTrips.length === 0 ? (
+          <div className="text-center py-8 text-slate-400">
+            <Navigation className="w-10 h-10 mx-auto mb-2 opacity-30 stroke-[1.5]" />
+            <p className="text-sm font-semibold text-slate-600">No trips logged yet today</p>
+            <p className="text-xs text-slate-400 mt-1">
+              When drivers submit trips from their dashboard, they will appear here and can be edited or reassigned.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
+                <tr>
+                  <th className="py-3 px-4">Driver</th>
+                  <th className="py-3 px-4">Client Company</th>
+                  <th className="py-3 px-4">Vehicle</th>
+                  <th className="py-3 px-4">Type</th>
+                  <th className="py-3 px-4 text-right">Distance</th>
+                  <th className="py-3 px-4">Time</th>
+                  <th className="py-3 px-4">Notes</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {todayTrips.map((trip) => {
+                  const driver = driverMap.get(trip.driver_id);
+                  const company = companyMap.get(trip.company_id);
+                  const vehicle = trip.vehicle_id ? vehicleMap.get(trip.vehicle_id) : undefined;
+
+                  return (
+                    <tr key={trip.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-slate-900">{driver?.full_name || 'Driver'}</div>
+                        <div className="text-xs text-slate-400 font-mono">
+                          {driver?.username ? `@${driver.username}` : driver?.phone || ''}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4 font-medium text-slate-800">
+                        {company?.name || 'Corporate Client'}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-xs text-slate-600">
+                        {vehicle?.registration_number || <span className="text-slate-400 italic">None</span>}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <Badge variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'} size="sm">
+                          {trip.trip_type === 'ONE_SIDE' ? '1-SIDE (x2)' : '2-SIDE (x1)'}
+                        </Badge>
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
+                        {trip.total_km} KM
+                        <span className="text-[10px] text-slate-400 font-normal block">
+                          ({trip.one_side_km} × {trip.multiplier})
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-xs font-mono text-slate-500 whitespace-nowrap">
+                        {formatTimeIST(trip.created_at)}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
+                        {trip.notes || '-'}
+                      </td>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenEditTrip(trip)}
+                          leftIcon={<Edit2 className="w-3.5 h-3.5 text-blue-600" />}
+                        >
+                          Edit Entry
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       {/* ADMIN PROFILE MODAL */}
       <AdminProfileModal
         isOpen={isAdminModalOpen}
         onClose={() => setIsAdminModalOpen(false)}
+        onSaved={loadDashboardData}
+      />
+
+      {/* EDIT DRIVER TRIP ENTRY MODAL */}
+      <EditTripModal
+        isOpen={isEditTripOpen}
+        onClose={() => setIsEditTripOpen(false)}
+        item={editingTripReportItem}
         onSaved={loadDashboardData}
       />
     </div>

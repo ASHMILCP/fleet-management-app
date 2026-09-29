@@ -6,6 +6,7 @@ import {
   Company,
   DutySession,
   Trip,
+  TripType,
   FuelLog,
   UberEarning,
   DriverTodaySummary,
@@ -1545,6 +1546,121 @@ export class FleetStore {
     return newTrip;
   }
 
+  static async updateTripAsync(
+    tripId: string,
+    updates: {
+      driver_id?: string;
+      company_id?: string;
+      vehicle_id?: string;
+      one_side_km?: number;
+      trip_type?: TripType;
+      multiplier?: 1 | 2;
+      total_km?: number;
+      trip_date?: string;
+      notes?: string;
+    }
+  ): Promise<Trip | null> {
+    const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
+    const trips = this.getTrips();
+    const idx = trips.findIndex((t) => t.id === cleanId || t.id === tripId);
+
+    let updatedTrip: Trip | null = null;
+    if (idx !== -1) {
+      const current = trips[idx];
+      const newMultiplier = (updates.multiplier ?? (updates.trip_type ? (updates.trip_type === 'ONE_SIDE' ? 2 : 1) : current.multiplier)) as (1 | 2);
+      const newOneSide = updates.one_side_km !== undefined ? updates.one_side_km : current.one_side_km;
+      const newTotalKm = updates.total_km !== undefined
+        ? updates.total_km
+        : parseFloat((newOneSide * newMultiplier).toFixed(2));
+
+      updatedTrip = {
+        ...current,
+        ...updates,
+        multiplier: newMultiplier,
+        one_side_km: newOneSide,
+        total_km: newTotalKm,
+      };
+      trips[idx] = updatedTrip;
+      setItem(STORAGE_KEYS.TRIPS, trips);
+    }
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const multiplier = updates.multiplier ?? (updates.trip_type ? (updates.trip_type === 'ONE_SIDE' ? 2 : 1) : 2);
+        const enteredKm = updates.one_side_km;
+        const totalKm = updates.total_km !== undefined
+          ? updates.total_km
+          : (enteredKm !== undefined ? parseFloat((enteredKm * multiplier).toFixed(2)) : undefined);
+
+        const payload: Record<string, any> = {};
+        if (updates.driver_id) payload.driver_id = updates.driver_id;
+        if (updates.company_id) payload.company_id = updates.company_id;
+        if (updates.vehicle_id !== undefined) payload.vehicle_id = updates.vehicle_id || null;
+        if (enteredKm !== undefined) {
+          payload.entered_km = enteredKm;
+          payload.one_side_km = enteredKm;
+        }
+        if (updates.trip_type) payload.trip_type = updates.trip_type;
+        if (updates.multiplier) {
+          payload.km_multiplier = updates.multiplier;
+          payload.multiplier = updates.multiplier;
+        }
+        if (totalKm !== undefined) payload.total_km = totalKm;
+        if (updates.trip_date) payload.trip_date = updates.trip_date;
+        if (updates.notes !== undefined) payload.notes = updates.notes || null;
+
+        const { error } = await supabase.from('trips').update(payload).eq('id', cleanId);
+        if (error) {
+          console.error('Supabase updateTripAsync error:', error);
+          throw error;
+        }
+
+        // Also check if this was an uber_earnings entry
+        try {
+          const { data: uCheck } = await supabase.from('uber_earnings').select('id').eq('id', cleanId).maybeSingle();
+          if (uCheck) {
+            const uPayload: Record<string, any> = {};
+            if (updates.driver_id) uPayload.driver_id = updates.driver_id;
+            if (updates.vehicle_id !== undefined) uPayload.vehicle_id = updates.vehicle_id || null;
+            if (updates.trip_date) uPayload.earnings_date = updates.trip_date;
+            if (updates.total_km !== undefined) uPayload.amount = updates.total_km;
+            if (updates.notes !== undefined) uPayload.notes = updates.notes || null;
+            await supabase.from('uber_earnings').update(uPayload).eq('id', cleanId);
+          }
+        } catch {
+          // ignore non-critical uber table check
+        }
+      } catch (err) {
+        console.error('Failed to update trip in cloud:', err);
+        throw err;
+      }
+    }
+
+    return updatedTrip;
+  }
+
+  static async deleteTripAsync(tripId: string): Promise<boolean> {
+    const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
+    const trips = this.getTrips().filter((t) => t.id !== cleanId && t.id !== tripId);
+    setItem(STORAGE_KEYS.TRIPS, trips);
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        await Promise.all([
+          supabase.from('trips').delete().eq('id', cleanId),
+          supabase.from('uber_earnings').delete().eq('id', cleanId).then(() => null, () => null),
+        ]);
+        return true;
+      } catch (err) {
+        console.error('Supabase deleteTripAsync error:', err);
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Fuel Logs (Cloud-First)
   static getFuelLogs(): FuelLog[] {
     return getItem<FuelLog[]>(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
@@ -2223,6 +2339,9 @@ export class FleetStore {
 
             items.push({
               id: `uber-${t.id}`,
+              driver_id: t.driver_id,
+              company_id: t.company_id,
+              vehicle_id: t.vehicle_id,
               trip_date: t.trip_date,
               driver_name: driver?.name || driver?.full_name || 'Driver',
               driver_phone: driver?.phone,
@@ -2265,6 +2384,9 @@ export class FleetStore {
 
             items.push({
               id: t.id,
+              driver_id: t.driver_id,
+              company_id: t.company_id,
+              vehicle_id: t.vehicle_id,
               trip_date: t.trip_date,
               driver_name: driver?.name || driver?.full_name || 'Driver',
               driver_phone: driver?.phone,
@@ -2441,6 +2563,9 @@ export class FleetStore {
 
         items.push({
           id: `uber-${t.id}`,
+          driver_id: t.driver_id,
+          company_id: t.company_id,
+          vehicle_id: t.vehicle_id,
           trip_date: t.trip_date,
           driver_name: driver?.full_name || 'Driver',
           driver_phone: driver?.phone,
@@ -2477,6 +2602,9 @@ export class FleetStore {
 
         items.push({
           id: t.id,
+          driver_id: t.driver_id,
+          company_id: t.company_id,
+          vehicle_id: t.vehicle_id,
           trip_date: t.trip_date,
           driver_name: driver?.full_name || 'Unknown Driver',
           driver_phone: driver?.phone,

@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
+import { EditTripModal } from '@/components/admin/EditTripModal';
 import {
   FileSpreadsheet,
   Download,
@@ -42,6 +43,8 @@ import {
   ShieldCheck,
   Phone,
   Fuel,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 
 export default function AdminReportsPage() {
@@ -64,6 +67,8 @@ export default function AdminReportsPage() {
   // Password visibility map for driver credentials inspection
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [isUberDialogOpen, setIsUberDialogOpen] = useState<boolean>(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [editingItem, setEditingItem] = useState<DetailedReportItem | null>(null);
 
   // Report datasets
   const [reportItems, setReportItems] = useState<DetailedReportItem[]>([]);
@@ -130,6 +135,21 @@ export default function AdminReportsPage() {
       window.removeEventListener('focus', handleFocus);
     };
   }, [filterCriteria]);
+
+  const handleOpenEditEntry = (item: DetailedReportItem) => {
+    setEditingItem(item);
+    setIsEditModalOpen(true);
+  };
+
+  const handleDeleteEntry = async (item: DetailedReportItem) => {
+    const isUber = item.company_name === 'Uber Platform' || item.id.startsWith('uber-');
+    const label = isUber ? 'Uber Payout Entry' : 'Trip Entry';
+    if (confirm(`Are you sure you want to delete this ${label} for ${item.driver_name} (${item.total_km > 0 ? `${item.total_km} km` : `₹${item.earnings}`})?\n\nThis will remove it from the database and recalculate report statistics.`)) {
+      const cleanId = item.id.startsWith('uber-') ? item.id.replace('uber-', '') : item.id;
+      await FleetStore.deleteTripAsync(cleanId);
+      refreshReportData();
+    }
+  };
 
   // Aggregate metrics - Trips
   const totalKm = useMemo(
@@ -849,6 +869,7 @@ export default function AdminReportsPage() {
                       <th className="py-3.5 px-4 text-right">KM Cost</th>
                       <th className="py-3.5 px-4 text-right">Net Profit</th>
                       <th className="py-3.5 px-4">Notes</th>
+                      <th className="py-3.5 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -922,6 +943,29 @@ export default function AdminReportsPage() {
                         <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
                           {item.notes || '-'}
                         </td>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          {item.company_name !== 'Fuel Log (Direct)' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenEditEntry(item)}
+                                title="Change Driver or Edit Entry"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold text-xs transition-colors"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEntry(item)}
+                                title="Delete Entry"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-300 text-xs italic">-</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -951,6 +995,7 @@ export default function AdminReportsPage() {
                       >
                         {formatCurrencyINR(netProfit)}
                       </td>
+                      <td></td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -1062,6 +1107,26 @@ export default function AdminReportsPage() {
                     {item.notes && (
                       <div className="text-[11px] text-slate-500 italic bg-amber-50/50 p-2 rounded-lg border border-amber-100">
                         Note: {item.notes}
+                      </div>
+                    )}
+
+                    {item.company_name !== 'Fuel Log (Direct)' && (
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenEditEntry(item)}
+                          leftIcon={<Edit2 className="w-3.5 h-3.5 text-blue-600" />}
+                        >
+                          Edit Entry
+                        </Button>
+                        <button
+                          onClick={() => handleDeleteEntry(item)}
+                          title="Delete Entry"
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-slate-200 hover:border-rose-200"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1472,6 +1537,14 @@ export default function AdminReportsPage() {
         onUberEarningAdded={() => {
           refreshReportData();
         }}
+      />
+
+      {/* EDIT DRIVER TRIP ENTRY MODAL */}
+      <EditTripModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        item={editingItem}
+        onSaved={refreshReportData}
       />
     </div>
   );

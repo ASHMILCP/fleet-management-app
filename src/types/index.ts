@@ -141,6 +141,9 @@ export interface ReportFilterCriteria {
 
 export interface DetailedReportItem {
   id: string;
+  driver_id?: string;
+  company_id?: string;
+  vehicle_id?: string;
   trip_date: string;
   driver_name: string;
   driver_phone?: string;

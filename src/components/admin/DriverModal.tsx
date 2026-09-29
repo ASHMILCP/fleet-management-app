@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Profile, Vehicle } from '@/types';
 import { FleetStore } from '@/lib/store';
+import { updateDriverAction } from '@/actions/management';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Eye, EyeOff, KeyRound } from 'lucide-react';
@@ -70,7 +71,7 @@ export const DriverModal: React.FC<DriverModalProps> = ({
 
     setIsSaving(true);
     try {
-      await FleetStore.saveDriverAsync({
+      const saved = await FleetStore.saveDriverAsync({
         id: driver?.id,
         full_name: fullName.trim(),
         username: username.trim() || undefined,
@@ -80,6 +81,19 @@ export const DriverModal: React.FC<DriverModalProps> = ({
         assigned_vehicle_id: assignedVehicleId || undefined,
         is_active: isActive,
       });
+
+      if (saved?.id) {
+        await updateDriverAction({
+          id: saved.id,
+          fullName: fullName.trim(),
+          username: username.trim() || undefined,
+          password: password.trim() || undefined,
+          phone: phone.trim() || undefined,
+          licenseNumber: licenseNumber.trim() || undefined,
+          assignedVehicleId: assignedVehicleId || undefined,
+          isActive: isActive,
+        }).catch((err) => console.warn('updateDriverAction background warning:', err));
+      }
 
       onSave();
       onClose();
