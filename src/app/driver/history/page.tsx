@@ -8,13 +8,16 @@ import { formatDateIST, formatTimeIST } from '@/lib/timezone';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Navigation, Building2, Calendar, FileText, RefreshCw, Download } from 'lucide-react';
+import { EditTripDialog } from '@/components/driver/EditTripDialog';
+import { Navigation, Building2, Calendar, FileText, RefreshCw, Download, Edit2 } from 'lucide-react';
 
 export default function DriverHistoryPage() {
   const router = useRouter();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [isEditTripOpen, setIsEditTripOpen] = useState(false);
 
   const loadTrips = useCallback(async () => {
     setIsRefreshing(true);
@@ -133,6 +136,7 @@ export default function DriverHistoryPage() {
                   <th className="py-3 px-4 text-center">Multiplier</th>
                   <th className="py-3 px-4 text-right">Total KM</th>
                   <th className="py-3 px-4">Notes</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -170,6 +174,20 @@ export default function DriverHistoryPage() {
                       <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
                         {trip.notes || '-'}
                       </td>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingTrip(trip);
+                            setIsEditTripOpen(true);
+                          }}
+                          className="h-7 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          leftIcon={<Edit2 className="w-3 h-3" />}
+                        >
+                          Edit
+                        </Button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -178,6 +196,18 @@ export default function DriverHistoryPage() {
           </div>
         )}
       </Card>
+
+      {/* EDIT TRIP DIALOG */}
+      <EditTripDialog
+        trip={editingTrip}
+        driverId={currentUser?.id || ''}
+        isOpen={isEditTripOpen}
+        onClose={() => {
+          setIsEditTripOpen(false);
+          setEditingTrip(null);
+        }}
+        onTripUpdated={loadTrips}
+      />
     </div>
   );
 }

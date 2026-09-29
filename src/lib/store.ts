@@ -1582,16 +1582,35 @@ export class FleetStore {
       };
       trips[idx] = updatedTrip;
       setItem(STORAGE_KEYS.TRIPS, trips);
+    } else {
+      const multiplier = (updates.multiplier ?? (updates.trip_type ? (updates.trip_type === 'ONE_SIDE' ? 2 : 1) : 2)) as (1 | 2);
+      const oneSide = updates.one_side_km ?? 0;
+      const totalKm = updates.total_km !== undefined ? updates.total_km : parseFloat((oneSide * multiplier).toFixed(2));
+      updatedTrip = {
+        id: cleanId,
+        driver_id: updates.driver_id || '',
+        company_id: updates.company_id || '',
+        vehicle_id: updates.vehicle_id,
+        one_side_km: oneSide,
+        trip_type: updates.trip_type || 'ONE_SIDE',
+        multiplier,
+        total_km: totalKm,
+        trip_date: updates.trip_date || getTodayDateIST(),
+        notes: updates.notes,
+        created_at: new Date().toISOString(),
+      };
+      trips.unshift(updatedTrip);
+      setItem(STORAGE_KEYS.TRIPS, trips);
     }
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        const multiplier = updates.multiplier ?? (updates.trip_type ? (updates.trip_type === 'ONE_SIDE' ? 2 : 1) : 2);
+        const multiplier = updates.multiplier ?? (updates.trip_type ? (updates.trip_type === 'ONE_SIDE' ? 2 : 1) : undefined);
         const enteredKm = updates.one_side_km;
         const totalKm = updates.total_km !== undefined
           ? updates.total_km
-          : (enteredKm !== undefined ? parseFloat((enteredKm * multiplier).toFixed(2)) : undefined);
+          : (enteredKm !== undefined && multiplier !== undefined ? parseFloat((enteredKm * multiplier).toFixed(2)) : undefined);
 
         const payload: Record<string, any> = {};
         if (updates.driver_id) payload.driver_id = updates.driver_id;
@@ -1599,18 +1618,31 @@ export class FleetStore {
         if (updates.vehicle_id !== undefined) payload.vehicle_id = updates.vehicle_id || null;
         if (enteredKm !== undefined) {
           payload.entered_km = enteredKm;
-          payload.one_side_km = enteredKm;
         }
         if (updates.trip_type) payload.trip_type = updates.trip_type;
-        if (updates.multiplier) {
-          payload.km_multiplier = updates.multiplier;
-          payload.multiplier = updates.multiplier;
+        if (multiplier !== undefined) {
+          payload.km_multiplier = multiplier;
         }
         if (totalKm !== undefined) payload.total_km = totalKm;
         if (updates.trip_date) payload.trip_date = updates.trip_date;
         if (updates.notes !== undefined) payload.notes = updates.notes || null;
 
-        const { error } = await supabase.from('trips').update(payload).eq('id', cleanId);
+        let { error } = await supabase.from('trips').update(payload).eq('id', cleanId);
+        if (error && (error.message?.includes('entered_km') || error.message?.includes('km_multiplier'))) {
+          // Graceful fallback for alternative schemas with one_side_km / multiplier
+          const fallbackPayload: Record<string, any> = { ...payload };
+          if ('entered_km' in fallbackPayload) {
+            fallbackPayload.one_side_km = fallbackPayload.entered_km;
+            delete fallbackPayload.entered_km;
+          }
+          if ('km_multiplier' in fallbackPayload) {
+            fallbackPayload.multiplier = fallbackPayload.km_multiplier;
+            delete fallbackPayload.km_multiplier;
+          }
+          const retry = await supabase.from('trips').update(fallbackPayload).eq('id', cleanId);
+          error = retry.error;
+        }
+
         if (error) {
           console.error('Supabase updateTripAsync error:', error);
           throw error;

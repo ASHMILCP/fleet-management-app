@@ -19,27 +19,42 @@ export async function createTripAction(params: {
     const multiplier = params.tripType === 'ONE_SIDE' ? 2 : 1;
     const totalKm = parseFloat((params.oneSideKm * multiplier).toFixed(2));
 
-    const { data, error } = await supabase
+    const payload: Record<string, any> = {
+      driver_id: params.driverId,
+      company_id: params.companyId,
+      vehicle_id: params.vehicleId || null,
+      entered_km: params.oneSideKm,
+      trip_type: params.tripType,
+      km_multiplier: multiplier,
+      total_km: totalKm,
+      trip_date: getTodayDateIST(),
+      notes: params.notes || null,
+    };
+
+    let { data, error } = await supabase
       .from('trips')
-      .insert({
-        driver_id: params.driverId,
-        company_id: params.companyId,
-        vehicle_id: params.vehicleId || null,
-        duty_session_id: params.dutySessionId || null,
-        one_side_km: params.oneSideKm,
-        entered_km: params.oneSideKm,
-        trip_type: params.tripType,
-        multiplier,
-        km_multiplier: multiplier,
-        total_km: totalKm,
-        trip_date: getTodayDateIST(),
-        notes: params.notes || null,
-      })
+      .insert(payload)
       .select()
       .single();
 
+    if (error && (error.message?.includes('entered_km') || error.message?.includes('km_multiplier'))) {
+      const fallbackPayload: Record<string, any> = { ...payload };
+      fallbackPayload.one_side_km = fallbackPayload.entered_km;
+      fallbackPayload.multiplier = fallbackPayload.km_multiplier;
+      delete fallbackPayload.entered_km;
+      delete fallbackPayload.km_multiplier;
+      const retry = await supabase
+        .from('trips')
+        .insert(fallbackPayload)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) throw error;
     revalidatePath('/driver');
+    revalidatePath('/driver/history');
     revalidatePath('/admin');
     revalidatePath('/admin/reports');
     return { success: true, data };
@@ -62,6 +77,7 @@ export async function updateTripAction(params: {
 }) {
   try {
     const supabase = await createClient();
+    const cleanId = params.id.startsWith('uber-') ? params.id.replace('uber-', '') : params.id;
     const multiplier = params.multiplier || (params.tripType === 'ONE_SIDE' ? 2 : 1);
     const totalKm = params.totalKm !== undefined ? params.totalKm : parseFloat((params.oneSideKm * multiplier).toFixed(2));
     const tripDate = params.tripDate || getTodayDateIST();
@@ -78,19 +94,52 @@ export async function updateTripAction(params: {
       notes: params.notes || null,
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('trips')
       .update(payload)
-      .eq('id', params.id)
+      .eq('id', cleanId)
       .select()
       .maybeSingle();
+
+    if (error && (error.message?.includes('entered_km') || error.message?.includes('km_multiplier'))) {
+      const fallbackPayload: Record<string, any> = { ...payload };
+      fallbackPayload.one_side_km = fallbackPayload.entered_km;
+      fallbackPayload.multiplier = fallbackPayload.km_multiplier;
+      delete fallbackPayload.entered_km;
+      delete fallbackPayload.km_multiplier;
+      const retry = await supabase
+        .from('trips')
+        .update(fallbackPayload)
+        .eq('id', cleanId)
+        .select()
+        .maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error('updateTripAction error:', error);
       throw error;
     }
 
+    // Also update uber_earnings if linked
+    try {
+      await supabase
+        .from('uber_earnings')
+        .update({
+          driver_id: params.driverId,
+          vehicle_id: params.vehicleId || null,
+          earnings_date: tripDate,
+          amount: totalKm,
+          notes: params.notes || null,
+        })
+        .eq('id', cleanId);
+    } catch {
+      // non-critical
+    }
+
     revalidatePath('/driver');
+    revalidatePath('/driver/history');
     revalidatePath('/admin');
     revalidatePath('/admin/reports');
     return { success: true, data };
@@ -102,13 +151,15 @@ export async function updateTripAction(params: {
 export async function deleteTripAction(tripId: string) {
   try {
     const supabase = await createClient();
-    const { error } = await supabase
-      .from('trips')
-      .delete()
-      .eq('id', tripId);
+    const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
 
-    if (error) throw error;
+    await Promise.all([
+      supabase.from('trips').delete().eq('id', cleanId),
+      supabase.from('uber_earnings').delete().eq('id', cleanId).then(() => null, () => null),
+    ]);
+
     revalidatePath('/driver');
+    revalidatePath('/driver/history');
     revalidatePath('/admin');
     revalidatePath('/admin/reports');
     return { success: true };

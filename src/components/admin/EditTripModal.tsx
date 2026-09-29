@@ -106,7 +106,10 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
       setTripType(item.trip_type || 'ONE_SIDE');
       setOneSideKm(item.one_side_km ? String(item.one_side_km) : '');
       setCustomTotalKm(item.total_km ? String(item.total_km) : '');
-      setIsCustomTotal(false);
+      const mult = (item.trip_type === 'ONE_SIDE' || !item.trip_type) ? 2 : 1;
+      const expected = parseFloat(((item.one_side_km || 0) * mult).toFixed(2));
+      const hasCustomOverride = Boolean(item.total_km && Math.abs(Number(item.total_km) - expected) > 0.05);
+      setIsCustomTotal(hasCustomOverride);
       setNotes(item.notes || '');
     }
   }, [isOpen, item]);
@@ -156,7 +159,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
       });
 
       // 2. Also execute server action for server-side Supabase update & revalidation
-      await updateTripAction({
+      const res = await updateTripAction({
         id: cleanTripId,
         driverId,
         companyId: companyId || item.company_id || '',
@@ -168,6 +171,10 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
         tripDate,
         notes: notes.trim() || undefined,
       });
+
+      if (res && !res.success) {
+        console.warn('Server action update warning:', res.error);
+      }
 
       onSaved();
       onClose();

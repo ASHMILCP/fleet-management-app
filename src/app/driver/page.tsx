@@ -7,6 +7,7 @@ import { Profile, Trip, FuelLog, DriverTodaySummary, Company } from '@/types';
 import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
 import { AddTripDialog } from '@/components/driver/AddTripDialog';
+import { EditTripDialog } from '@/components/driver/EditTripDialog';
 import { AddFuelDialog } from '@/components/driver/AddFuelDialog';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { TodaySummaryCard } from '@/components/driver/TodaySummaryCard';
@@ -23,6 +24,7 @@ import {
   Calendar,
   Layers,
   ArrowRight,
+  Edit2,
 } from 'lucide-react';
 
 export default function DriverDashboard() {
@@ -31,6 +33,8 @@ export default function DriverDashboard() {
   const [isTripDialogOpen, setIsTripDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
   const [isUberDialogOpen, setIsUberDialogOpen] = useState(false);
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [isEditTripOpen, setIsEditTripOpen] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [todaySummary, setTodaySummary] = useState<DriverTodaySummary>({
     dutySession: null,
@@ -295,6 +299,18 @@ export default function DriverDashboard() {
                             ({trip.one_side_km} × {trip.multiplier})
                           </div>
                         </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingTrip(trip);
+                            setIsEditTripOpen(true);
+                          }}
+                          className="h-8 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-slate-200"
+                          leftIcon={<Edit2 className="w-3.5 h-3.5" />}
+                        >
+                          Edit
+                        </Button>
                       </div>
                     </div>
                   );
@@ -363,6 +379,16 @@ export default function DriverDashboard() {
             isOpen={isTripDialogOpen}
             onClose={() => setIsTripDialogOpen(false)}
             onTripAdded={handleStateChange}
+          />
+          <EditTripDialog
+            trip={editingTrip}
+            driverId={currentUser.id}
+            isOpen={isEditTripOpen}
+            onClose={() => {
+              setIsEditTripOpen(false);
+              setEditingTrip(null);
+            }}
+            onTripUpdated={handleStateChange}
           />
           <AddFuelDialog
             driverId={currentUser.id}
