@@ -470,26 +470,8 @@ export class FleetStore {
           notes: row.notes,
           created_at: row.created_at || new Date().toISOString(),
         }));
-        const cloudTripIds = new Set(cloudTrips.map((t) => t.id));
-        const unsyncedTrips = localTrips.filter((t) => !cloudTripIds.has(t.id));
-        for (const ut of unsyncedTrips) {
-          supabase.from('trips').upsert({
-            id: ut.id,
-            driver_id: ut.driver_id,
-            company_id: ut.company_id,
-            vehicle_id: ut.vehicle_id || null,
-            entered_km: ut.one_side_km,
-            trip_type: ut.trip_type,
-            km_multiplier: ut.multiplier || (ut.trip_type === 'TWO_SIDE' ? 1 : 2),
-            total_km: ut.total_km,
-            trip_date: ut.trip_date,
-            notes: ut.notes || null,
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading trip to Supabase:', error);
-          });
-        }
-        const mergedTrips = [...cloudTrips, ...unsyncedTrips];
-        setItem(STORAGE_KEYS.TRIPS, mergedTrips);
+        // Supabase is the single source of truth for trips.
+        setItem(STORAGE_KEYS.TRIPS, cloudTrips);
       }
 
       // 6. FUEL LOGS SYNC & MERGE
@@ -1612,10 +1594,29 @@ export class FleetStore {
           ? updates.total_km
           : (enteredKm !== undefined && multiplier !== undefined ? parseFloat((enteredKm * multiplier).toFixed(2)) : undefined);
 
+        // Ensure driver exists in drivers table to avoid foreign key violation
+        if (updates.driver_id) {
+          const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', updates.driver_id).maybeSingle();
+          if (!drvCheck) {
+            const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', updates.driver_id).maybeSingle();
+            if (!drvUserCheck) {
+              await supabase.from('drivers').insert({
+                id: updates.driver_id,
+                user_id: updates.driver_id,
+                driver_id_code: 'DRV-' + updates.driver_id.slice(0, 6).toUpperCase(),
+                status: 'ACTIVE',
+              });
+            }
+          }
+        }
+
+        const cleanVehicleId = updates.vehicle_id && updates.vehicle_id !== 'null' && updates.vehicle_id !== 'undefined' ? updates.vehicle_id : null;
+        const cleanNotes = updates.notes && updates.notes.trim() ? updates.notes.trim() : null;
+
         const payload: Record<string, any> = {};
         if (updates.driver_id) payload.driver_id = updates.driver_id;
         if (updates.company_id) payload.company_id = updates.company_id;
-        if (updates.vehicle_id !== undefined) payload.vehicle_id = updates.vehicle_id || null;
+        if (updates.vehicle_id !== undefined) payload.vehicle_id = cleanVehicleId;
         if (enteredKm !== undefined) {
           payload.entered_km = enteredKm;
         }
@@ -1625,7 +1626,7 @@ export class FleetStore {
         }
         if (totalKm !== undefined) payload.total_km = totalKm;
         if (updates.trip_date) payload.trip_date = updates.trip_date;
-        if (updates.notes !== undefined) payload.notes = updates.notes || null;
+        if (updates.notes !== undefined) payload.notes = cleanNotes;
 
         let { error } = await supabase.from('trips').update(payload).eq('id', cleanId);
         if (error && (error.message?.includes('entered_km') || error.message?.includes('km_multiplier'))) {
@@ -1654,14 +1655,29 @@ export class FleetStore {
           if (uCheck) {
             const uPayload: Record<string, any> = {};
             if (updates.driver_id) uPayload.driver_id = updates.driver_id;
-            if (updates.vehicle_id !== undefined) uPayload.vehicle_id = updates.vehicle_id || null;
+            if (updates.vehicle_id !== undefined) uPayload.vehicle_id = cleanVehicleId;
             if (updates.trip_date) uPayload.earnings_date = updates.trip_date;
             if (updates.total_km !== undefined) uPayload.amount = updates.total_km;
-            if (updates.notes !== undefined) uPayload.notes = updates.notes || null;
+            if (updates.notes !== undefined) uPayload.notes = cleanNotes;
             await supabase.from('uber_earnings').update(uPayload).eq('id', cleanId);
           }
         } catch {
           // ignore non-critical uber table check
+        }
+
+        // Keep local uber earnings in sync if this was an Uber entry
+        const ubers = this.getUberEarnings();
+        const uIdx = ubers.findIndex((u) => u.id === cleanId || u.id === tripId);
+        if (uIdx !== -1) {
+          ubers[uIdx] = {
+            ...ubers[uIdx],
+            driver_id: updates.driver_id || ubers[uIdx].driver_id,
+            vehicle_id: cleanVehicleId || undefined,
+            earnings_date: updates.trip_date || ubers[uIdx].earnings_date,
+            amount: updates.total_km !== undefined ? updates.total_km : ubers[uIdx].amount,
+            notes: cleanNotes || undefined,
+          };
+          setItem(STORAGE_KEYS.UBER_EARNINGS, ubers);
         }
       } catch (err) {
         console.error('Failed to update trip in cloud:', err);
@@ -1676,6 +1692,9 @@ export class FleetStore {
     const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
     const trips = this.getTrips().filter((t) => t.id !== cleanId && t.id !== tripId);
     setItem(STORAGE_KEYS.TRIPS, trips);
+
+    const ubers = this.getUberEarnings().filter((u) => u.id !== cleanId && u.id !== tripId);
+    setItem(STORAGE_KEYS.UBER_EARNINGS, ubers);
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
@@ -1947,6 +1966,61 @@ export class FleetStore {
     all.unshift(newUber);
     setItem(STORAGE_KEYS.UBER_EARNINGS, all);
     return newUber;
+  }
+
+  static async updateUberEarningAsync(
+    id: string,
+    updates: {
+      driver_id?: string;
+      vehicle_id?: string | null;
+      earnings_date?: string;
+      amount?: number;
+      rides_count?: number | null;
+      notes?: string | null;
+    }
+  ): Promise<UberEarning | null> {
+    const cleanId = id.startsWith('uber-') ? id.replace('uber-', '') : id;
+    const all = this.getUberEarnings();
+    const idx = all.findIndex((u) => u.id === cleanId || u.id === id);
+    let updated: UberEarning | null = null;
+    if (idx !== -1) {
+      updated = {
+        ...all[idx],
+        ...updates,
+        amount: updates.amount !== undefined ? updates.amount : all[idx].amount,
+        vehicle_id: updates.vehicle_id !== undefined ? (updates.vehicle_id || undefined) : all[idx].vehicle_id,
+        notes: updates.notes !== undefined ? (updates.notes || undefined) : all[idx].notes,
+      };
+      all[idx] = updated;
+      setItem(STORAGE_KEYS.UBER_EARNINGS, all);
+    }
+
+    if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const payload: Record<string, any> = {};
+        if (updates.driver_id) payload.driver_id = updates.driver_id;
+        if (updates.vehicle_id !== undefined) payload.vehicle_id = updates.vehicle_id || null;
+        if (updates.earnings_date) payload.earnings_date = updates.earnings_date;
+        if (updates.amount !== undefined) payload.amount = updates.amount;
+        if (updates.rides_count !== undefined) payload.rides_count = updates.rides_count;
+        if (updates.notes !== undefined) payload.notes = updates.notes || null;
+
+        await Promise.all([
+          supabase.from('uber_earnings').update(payload).eq('id', cleanId),
+          supabase.from('trips').update({
+            driver_id: updates.driver_id,
+            vehicle_id: updates.vehicle_id || null,
+            trip_date: updates.earnings_date,
+            total_km: updates.amount,
+            notes: `[UBER_EARNINGS:${JSON.stringify({ amount: updates.amount, rides: updates.rides_count, notes: updates.notes })}]`,
+          }).eq('id', cleanId).then(() => null, () => null),
+        ]);
+      } catch (err) {
+        console.warn('Supabase updateUberEarningAsync error:', err);
+      }
+    }
+    return updated;
   }
 
   static async deleteUberEarningAsync(id: string): Promise<void> {
@@ -2519,6 +2593,9 @@ export class FleetStore {
             const amt = Number(u.amount || 0);
             items.push({
               id: `uber-${u.id}`,
+              driver_id: u.driver_id,
+              company_id: uberCompId,
+              vehicle_id: u.vehicle_id,
               trip_date: u.earnings_date || (u.created_at ? u.created_at.split('T')[0] : getTodayDateIST()),
               driver_name: driver?.name || driver?.full_name || 'Driver',
               driver_phone: driver?.phone,

@@ -18,17 +18,35 @@ export async function createTripAction(params: {
     const supabase = await createClient();
     const multiplier = params.tripType === 'ONE_SIDE' ? 2 : 1;
     const totalKm = parseFloat((params.oneSideKm * multiplier).toFixed(2));
+    // Ensure driver exists in drivers table to avoid foreign key violation
+    if (params.driverId) {
+      const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', params.driverId).maybeSingle();
+      if (!drvCheck) {
+        const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', params.driverId).maybeSingle();
+        if (!drvUserCheck) {
+          await supabase.from('drivers').insert({
+            id: params.driverId,
+            user_id: params.driverId,
+            driver_id_code: 'DRV-' + params.driverId.slice(0, 6).toUpperCase(),
+            status: 'ACTIVE',
+          });
+        }
+      }
+    }
+
+    const cleanVehicleId = params.vehicleId && params.vehicleId !== 'null' && params.vehicleId !== 'undefined' ? params.vehicleId : null;
+    const cleanNotes = params.notes && params.notes.trim() ? params.notes.trim() : null;
 
     const payload: Record<string, any> = {
       driver_id: params.driverId,
       company_id: params.companyId,
-      vehicle_id: params.vehicleId || null,
+      vehicle_id: cleanVehicleId,
       entered_km: params.oneSideKm,
       trip_type: params.tripType,
       km_multiplier: multiplier,
       total_km: totalKm,
       trip_date: getTodayDateIST(),
-      notes: params.notes || null,
+      notes: cleanNotes,
     };
 
     let { data, error } = await supabase
@@ -82,16 +100,35 @@ export async function updateTripAction(params: {
     const totalKm = params.totalKm !== undefined ? params.totalKm : parseFloat((params.oneSideKm * multiplier).toFixed(2));
     const tripDate = params.tripDate || getTodayDateIST();
 
+    // Ensure driver exists in drivers table to avoid foreign key violation
+    if (params.driverId) {
+      const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', params.driverId).maybeSingle();
+      if (!drvCheck) {
+        const { data: drvUserCheck } = await supabase.from('drivers').select('id').eq('user_id', params.driverId).maybeSingle();
+        if (!drvUserCheck) {
+          await supabase.from('drivers').insert({
+            id: params.driverId,
+            user_id: params.driverId,
+            driver_id_code: 'DRV-' + params.driverId.slice(0, 6).toUpperCase(),
+            status: 'ACTIVE',
+          });
+        }
+      }
+    }
+
+    const cleanVehicleId = params.vehicleId && params.vehicleId !== 'null' && params.vehicleId !== 'undefined' ? params.vehicleId : null;
+    const cleanNotes = params.notes && params.notes.trim() ? params.notes.trim() : null;
+
     const payload: Record<string, any> = {
       driver_id: params.driverId,
       company_id: params.companyId,
-      vehicle_id: params.vehicleId || null,
+      vehicle_id: cleanVehicleId,
       entered_km: params.oneSideKm,
       trip_type: params.tripType,
       km_multiplier: multiplier,
       total_km: totalKm,
       trip_date: tripDate,
-      notes: params.notes || null,
+      notes: cleanNotes,
     };
 
     let { data, error } = await supabase
@@ -128,10 +165,10 @@ export async function updateTripAction(params: {
         .from('uber_earnings')
         .update({
           driver_id: params.driverId,
-          vehicle_id: params.vehicleId || null,
+          vehicle_id: cleanVehicleId,
           earnings_date: tripDate,
           amount: totalKm,
-          notes: params.notes || null,
+          notes: cleanNotes,
         })
         .eq('id', cleanId);
     } catch {

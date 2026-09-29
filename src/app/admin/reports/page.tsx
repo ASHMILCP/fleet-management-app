@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { EditTripModal } from '@/components/admin/EditTripModal';
+import { deleteTripAction } from '@/actions/trips';
 import {
   FileSpreadsheet,
   Download,
@@ -146,7 +147,11 @@ export default function AdminReportsPage() {
     const label = isUber ? 'Uber Payout Entry' : 'Trip Entry';
     if (confirm(`Are you sure you want to delete this ${label} for ${item.driver_name} (${item.total_km > 0 ? `${item.total_km} km` : `₹${item.earnings}`})?\n\nThis will remove it from the database and recalculate report statistics.`)) {
       const cleanId = item.id.startsWith('uber-') ? item.id.replace('uber-', '') : item.id;
-      await FleetStore.deleteTripAsync(cleanId);
+      await Promise.all([
+        FleetStore.deleteTripAsync(cleanId),
+        FleetStore.deleteUberEarningAsync(cleanId),
+        deleteTripAction(cleanId),
+      ]);
       refreshReportData();
     }
   };

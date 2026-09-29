@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { FleetStore } from '@/lib/store';
 import { AdminSummaryMetrics, DutySession, Profile, Vehicle, Company, Trip, DetailedReportItem } from '@/types';
 import { formatTimeIST, formatCurrencyINR, getTodayDateIST } from '@/lib/timezone';
+import { deleteTripAction } from '@/actions/trips';
 import { StatCard } from '@/components/admin/StatCard';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -28,6 +29,9 @@ import {
   KeyRound,
   Edit2,
   Trash2,
+  Search,
+  Filter,
+  CheckCircle,
 } from 'lucide-react';
 import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
 import { EditTripModal } from '@/components/admin/EditTripModal';
@@ -47,17 +51,25 @@ export default function AdminDashboard() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [allTrips, setAllTrips] = useState<Trip[]>([]);
   const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isEditTripOpen, setIsEditTripOpen] = useState(false);
   const [editingTripReportItem, setEditingTripReportItem] = useState<DetailedReportItem | null>(null);
 
+  // Filter states for Trip Entry Logs
+  const [tripDateFilter, setTripDateFilter] = useState<'TODAY' | 'YESTERDAY' | 'WEEK' | 'ALL' | 'CUSTOM'>('TODAY');
+  const [customTripDate, setCustomTripDate] = useState<string>(getTodayDateIST());
+  const [tripSearch, setTripSearch] = useState<string>('');
+  const [selectedDriverFilter, setSelectedDriverFilter] = useState<string>('ALL');
+  const [lastSyncedTime, setLastSyncedTime] = useState<string>('');
+
   const loadDashboardData = async () => {
     setIsRefreshing(true);
     try {
       await FleetStore.syncWithSupabase();
-      const [data, allSessions, allTrips] = await Promise.all([
+      const [data, allSessions, tripsList] = await Promise.all([
         FleetStore.fetchAdminMetricsAsync(),
         FleetStore.fetchDutySessionsAsync(),
         FleetStore.fetchTripsAsync(),
@@ -65,13 +77,15 @@ export default function AdminDashboard() {
       setMetrics(data);
       setActiveSessions(allSessions.filter((s) => s.status === 'ACTIVE' || !s.end_time));
 
+      setAllTrips(tripsList);
       const today = getTodayDateIST();
-      const tripsToday = allTrips.filter((t) => t.trip_date === today);
+      const tripsToday = tripsList.filter((t) => t.trip_date === today);
       setTodayTrips(tripsToday);
 
       setDrivers(FleetStore.getDrivers());
       setVehicles(FleetStore.getVehicles());
       setCompanies(FleetStore.getCompanies());
+      setLastSyncedTime(new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       console.error('Error loading admin dashboard data:', err);
     } finally {
@@ -99,9 +113,49 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  const driverMap = new Map(drivers.map((d) => [d.id, d]));
-  const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
-  const companyMap = new Map(companies.map((c) => [c.id, c]));
+  const driverMap = useMemo(() => new Map(drivers.map((d) => [d.id, d])), [drivers]);
+  const vehicleMap = useMemo(() => new Map(vehicles.map((v) => [v.id, v])), [vehicles]);
+  const companyMap = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
+
+  // Compute filtered trips based on date tabs, driver filter, and search
+  const filteredTrips = useMemo(() => {
+    const today = getTodayDateIST();
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = yesterdayDate.toISOString().split('T')[0];
+
+    const weekAgoDate = new Date();
+    weekAgoDate.setDate(weekAgoDate.getDate() - 7);
+    const weekAgo = weekAgoDate.toISOString().split('T')[0];
+
+    return allTrips.filter((t) => {
+      // 1. Date Filter
+      if (tripDateFilter === 'TODAY' && t.trip_date !== today) return false;
+      if (tripDateFilter === 'YESTERDAY' && t.trip_date !== yesterday) return false;
+      if (tripDateFilter === 'WEEK' && (t.trip_date < weekAgo || t.trip_date > today)) return false;
+      if (tripDateFilter === 'CUSTOM' && customTripDate && t.trip_date !== customTripDate) return false;
+
+      // 2. Driver Filter
+      if (selectedDriverFilter !== 'ALL' && t.driver_id !== selectedDriverFilter) return false;
+
+      // 3. Search Filter
+      if (tripSearch.trim()) {
+        const q = tripSearch.toLowerCase();
+        const d = driverMap.get(t.driver_id);
+        const c = companyMap.get(t.company_id);
+        const v = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
+        const match =
+          (d?.full_name && d.full_name.toLowerCase().includes(q)) ||
+          (d?.username && d.username.toLowerCase().includes(q)) ||
+          (c?.name && c.name.toLowerCase().includes(q)) ||
+          (v?.registration_number && v.registration_number.toLowerCase().includes(q)) ||
+          (t.notes && t.notes.toLowerCase().includes(q));
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [allTrips, tripDateFilter, customTripDate, selectedDriverFilter, tripSearch, driverMap, companyMap, vehicleMap]);
 
   const handleOpenEditTrip = (trip: Trip) => {
     const driver = driverMap.get(trip.driver_id);
@@ -109,6 +163,27 @@ export default function AdminDashboard() {
     const vehicle = trip.vehicle_id ? vehicleMap.get(trip.vehicle_id) : undefined;
     const rate = company?.billing_rate_per_km || 0;
     const earnings = parseFloat((trip.total_km * rate).toFixed(2));
+
+    const isUber = Boolean(
+      (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
+      company?.name?.toLowerCase().includes('uber') ||
+      trip.id.startsWith('uber-')
+    );
+
+    let uberAmount = 0;
+    let cleanNotes = trip.notes;
+    if (isUber && trip.notes && trip.notes.includes('[UBER_EARNINGS:')) {
+      try {
+        const match = trip.notes.match(/\[UBER_EARNINGS:(.*?)\]/);
+        if (match && match[1]) {
+          const parsed = JSON.parse(match[1]);
+          if (parsed.amount) uberAmount = Number(parsed.amount);
+          if (parsed.notes) cleanNotes = parsed.notes;
+        }
+      } catch {
+        // fallback
+      }
+    }
 
     setEditingTripReportItem({
       id: trip.id,
@@ -119,18 +194,43 @@ export default function AdminDashboard() {
       driver_name: driver?.full_name || 'Driver',
       driver_phone: driver?.phone,
       vehicle_reg: vehicle?.registration_number,
-      company_name: company?.name || 'Company',
+      company_name: isUber ? 'Uber Platform' : (company?.name || 'Company'),
       trip_type: trip.trip_type,
       one_side_km: trip.one_side_km,
       multiplier: trip.multiplier,
-      total_km: trip.total_km,
+      total_km: isUber && uberAmount > 0 ? uberAmount : trip.total_km,
       billing_rate_per_km: rate,
-      earnings: earnings,
+      earnings: isUber && uberAmount > 0 ? uberAmount : earnings,
       fuel_amount: 0,
       created_at: trip.created_at,
       notes: trip.notes,
     });
     setIsEditTripOpen(true);
+  };
+
+  const handleDeleteTrip = async (trip: Trip) => {
+    const driver = driverMap.get(trip.driver_id);
+    const isUber = Boolean(
+      (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
+      companyMap.get(trip.company_id)?.name?.toLowerCase().includes('uber')
+    );
+    const label = isUber ? 'Uber Platform Entry' : 'Trip Entry';
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete this ${label} for ${driver?.full_name || 'Driver'} (${trip.total_km} KM)?\n\nThis will remove it directly from the database and recalculate fleet statistics.`
+    );
+    if (!confirmDelete) return;
+
+    try {
+      await Promise.all([
+        FleetStore.deleteTripAsync(trip.id),
+        FleetStore.deleteUberEarningAsync(trip.id),
+        deleteTripAction(trip.id),
+      ]);
+      await loadDashboardData();
+    } catch (err) {
+      console.error('Error deleting trip from admin dashboard:', err);
+      alert('Failed to delete trip from database');
+    }
   };
 
   return (
@@ -423,106 +523,370 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* 4. TODAY'S DRIVER ENTRIES SECTION */}
+      {/* 4. TRIP ENTRY LOG MANAGEMENT SECTION */}
       <Card
         title={
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-2">
-              <Navigation className="w-5 h-5 text-blue-600" />
-              <span className="font-bold text-slate-900">
-                Today&apos;s Logged Driver Entries ({todayTrips.length})
-              </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-100/70 text-blue-700">
+                <Navigation className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900 text-base sm:text-lg">
+                    Trip Entry Log Management
+                  </span>
+                  <Badge variant="info" size="sm">
+                    {filteredTrips.length} {filteredTrips.length === 1 ? 'Entry' : 'Entries'}
+                  </Badge>
+                </div>
+                <div className="text-xs text-slate-500 font-normal mt-0.5">
+                  Review, edit, reassign, or delete driver trip logs directly in the cloud database
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadDashboardData}
+                disabled={isRefreshing}
+                leftIcon={<RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isRefreshing ? 'animate-spin' : ''}`} />}
+              >
+                {isRefreshing ? 'Syncing...' : 'Sync Database'}
+              </Button>
+              <Link
+                href="/admin/reports"
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors"
+              >
+                <span>Full Reports</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
           </div>
         }
-        subtitle="Review, edit, or reassign driver entries logged today across the fleet"
-        action={
-          <Link
-            href="/admin/reports"
-            className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-          >
-            <span>View All in Reports</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        }
       >
-        {todayTrips.length === 0 ? (
-          <div className="text-center py-8 text-slate-400">
-            <Navigation className="w-10 h-10 mx-auto mb-2 opacity-30 stroke-[1.5]" />
-            <p className="text-sm font-semibold text-slate-600">No trips logged yet today</p>
-            <p className="text-xs text-slate-400 mt-1">
-              When drivers submit trips from their dashboard, they will appear here and can be edited or reassigned.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Driver</th>
-                  <th className="py-3 px-4">Client Company</th>
-                  <th className="py-3 px-4">Vehicle</th>
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4 text-right">Distance</th>
-                  <th className="py-3 px-4">Time</th>
-                  <th className="py-3 px-4">Notes</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {todayTrips.map((trip) => {
-                  const driver = driverMap.get(trip.driver_id);
-                  const company = companyMap.get(trip.company_id);
-                  const vehicle = trip.vehicle_id ? vehicleMap.get(trip.vehicle_id) : undefined;
+        <div className="space-y-4">
+          {/* FILTER CONTROLS BAR */}
+          <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3">
+            {/* Quick Date Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <span>Date:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setTripDateFilter('TODAY')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  tripDateFilter === 'TODAY'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Today ({todayTrips.length})
+              </button>
 
-                  return (
-                    <tr key={trip.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-900">{driver?.full_name || 'Driver'}</div>
-                        <div className="text-xs text-slate-400 font-mono">
-                          {driver?.username ? `@${driver.username}` : driver?.phone || ''}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4 font-medium text-slate-800">
-                        {company?.name || 'Corporate Client'}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-xs text-slate-600">
-                        {vehicle?.registration_number || <span className="text-slate-400 italic">None</span>}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <Badge variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'} size="sm">
-                          {trip.trip_type === 'ONE_SIDE' ? '1-SIDE (x2)' : '2-SIDE (x1)'}
-                        </Badge>
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                        {trip.total_km} KM
-                        <span className="text-[10px] text-slate-400 font-normal block">
-                          ({trip.one_side_km} × {trip.multiplier})
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-xs font-mono text-slate-500 whitespace-nowrap">
-                        {formatTimeIST(trip.created_at)}
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
-                        {trip.notes || '-'}
-                      </td>
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleOpenEditTrip(trip)}
-                          leftIcon={<Edit2 className="w-3.5 h-3.5 text-blue-600" />}
-                        >
-                          Edit Entry
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+              <button
+                type="button"
+                onClick={() => setTripDateFilter('YESTERDAY')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  tripDateFilter === 'YESTERDAY'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Yesterday
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTripDateFilter('WEEK')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  tripDateFilter === 'WEEK'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Last 7 Days
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTripDateFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  tripDateFilter === 'ALL'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                All Logs ({allTrips.length})
+              </button>
+
+              <div className="flex items-center gap-1.5 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setTripDateFilter('CUSTOM')}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    tripDateFilter === 'CUSTOM'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Pick Date
+                </button>
+                <input
+                  type="date"
+                  value={customTripDate}
+                  onChange={(e) => {
+                    setCustomTripDate(e.target.value);
+                    setTripDateFilter('CUSTOM');
+                  }}
+                  className="px-2.5 py-1 bg-white border border-slate-300 rounded-xl text-xs font-mono font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Driver Dropdown & Search Input */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={tripSearch}
+                  onChange={(e) => setTripSearch(e.target.value)}
+                  placeholder="Search driver, company, vehicle, notes..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={selectedDriverFilter}
+                  onChange={(e) => setSelectedDriverFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                >
+                  <option value="ALL">All Drivers ({drivers.length})</option>
+                  {drivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.full_name} {d.username ? `(@${d.username})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status info */}
+              <div className="flex items-center justify-between sm:justify-end gap-3 text-[11px] text-slate-500 px-1">
+                {lastSyncedTime && (
+                  <span className="font-mono text-slate-400">
+                    Synced: {lastSyncedTime}
+                  </span>
+                )}
+                {(tripSearch || selectedDriverFilter !== 'ALL' || tripDateFilter !== 'TODAY') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTripDateFilter('TODAY');
+                      setSelectedDriverFilter('ALL');
+                      setTripSearch('');
+                    }}
+                    className="text-blue-600 hover:underline font-bold"
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* TRIP LOGS TABLE */}
+          {filteredTrips.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+              <Navigation className="w-10 h-10 mx-auto mb-2 opacity-30 stroke-[1.5]" />
+              <p className="text-sm font-bold text-slate-700">No trip entry logs found</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                No entries matched the selected date or filter criteria. Switch to &quot;All Logs&quot; or check driver submissions.
+              </p>
+              {(tripSearch || selectedDriverFilter !== 'ALL' || tripDateFilter !== 'TODAY') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTripDateFilter('ALL');
+                    setSelectedDriverFilter('ALL');
+                    setTripSearch('');
+                  }}
+                  className="mt-3 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 transition-colors"
+                >
+                  View All Logs ({allTrips.length})
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-4">Date &amp; Time</th>
+                    <th className="py-3 px-4">Driver</th>
+                    <th className="py-3 px-4">Client Company</th>
+                    <th className="py-3 px-4">Vehicle</th>
+                    <th className="py-3 px-4">Journey Type</th>
+                    <th className="py-3 px-4 text-right">Distance / Payout</th>
+                    <th className="py-3 px-4">Route Notes</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTrips.map((trip) => {
+                    const driver = driverMap.get(trip.driver_id);
+                    const company = companyMap.get(trip.company_id);
+                    const vehicle = trip.vehicle_id ? vehicleMap.get(trip.vehicle_id) : undefined;
+
+                    const isUber = Boolean(
+                      (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
+                      company?.name?.toLowerCase().includes('uber') ||
+                      trip.id.startsWith('uber-')
+                    );
+
+                    let uberAmount = 0;
+                    let uberRides: number | null = null;
+                    let displayNotes = trip.notes || '-';
+
+                    if (isUber && trip.notes && trip.notes.includes('[UBER_EARNINGS:')) {
+                      try {
+                        const match = trip.notes.match(/\[UBER_EARNINGS:(.*?)\]/);
+                        if (match && match[1]) {
+                          const parsed = JSON.parse(match[1]);
+                          if (parsed.amount) uberAmount = Number(parsed.amount);
+                          if (parsed.rides) uberRides = Number(parsed.rides);
+                          displayNotes = parsed.notes || (uberRides ? `${uberRides} rides completed` : 'Uber Shift Payout');
+                        }
+                      } catch {
+                        // fallback
+                      }
+                    }
+
+                    return (
+                      <tr key={trip.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="font-mono font-bold text-slate-900 text-xs">
+                            {trip.trip_date}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-400">
+                            {formatTimeIST(trip.created_at)}
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-black flex items-center justify-center shrink-0">
+                              {(driver?.full_name || 'D')[0].toUpperCase()}
+                            </span>
+                            <span>{driver?.full_name || 'Driver'}</span>
+                          </div>
+                          <div className="text-xs text-slate-400 font-mono ml-6.5">
+                            {driver?.username ? `@${driver.username}` : driver?.phone || ''}
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {isUber ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200">
+                              <Car className="w-3.5 h-3.5" />
+                              <span>Uber Platform</span>
+                            </span>
+                          ) : (
+                            <div>
+                              <span className="font-medium text-slate-800">
+                                {company?.name || 'Corporate Client'}
+                              </span>
+                              {company?.billing_rate_per_km ? (
+                                <span className="text-[11px] text-slate-400 block font-mono">
+                                  ₹{company.billing_rate_per_km}/KM
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono text-xs text-slate-600">
+                          {vehicle?.registration_number ? (
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 font-bold text-slate-800">
+                              {vehicle.registration_number}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">None</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {isUber ? (
+                            <Badge variant="success" size="sm">
+                              PLATFORM SHIFT
+                            </Badge>
+                          ) : (
+                            <Badge variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'} size="sm">
+                              {trip.trip_type === 'ONE_SIDE' ? '1-SIDE (x2)' : '2-SIDE (x1)'}
+                            </Badge>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {isUber ? (
+                            <div>
+                              <span className="text-emerald-700 font-black text-sm">
+                                {formatCurrencyINR(uberAmount > 0 ? uberAmount : trip.total_km)}
+                              </span>
+                              <span className="text-[10px] text-emerald-600 font-normal block">
+                                Uber Earnings
+                              </span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="text-slate-900 font-black text-sm">
+                                {trip.total_km} KM
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-normal block">
+                                ({trip.one_side_km} × {trip.multiplier})
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
+                          {displayNotes}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditTrip(trip)}
+                              title="Edit Entry Log & Rechange Database"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold text-xs transition-colors"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTrip(trip)}
+                              title="Delete from Database"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </Card>
 
       {/* ADMIN PROFILE MODAL */}
