@@ -89,6 +89,8 @@ export interface FuelLog {
   vehicle?: Vehicle;
 }
 
+export type UberEntryType = 'UBER_EARNINGS' | 'UBER_RENT';
+
 export interface UberEarning {
   id: string;
   driver_id: string;
@@ -97,6 +99,7 @@ export interface UberEarning {
   amount: number;
   rides_count?: number | null;
   earnings_date: string; // YYYY-MM-DD
+  category?: UberEntryType;
   notes?: string;
   created_at: string;
   // joined fields
@@ -115,6 +118,7 @@ export interface DriverTodaySummary {
   fuelExpense: number;
   fuelCostPerKm: number; // fuelExpense / totalKm
   uberEarnings: number;
+  uberRent: number;
   tripEarnings: number;
   totalEarnings: number;
   netEarnings: number;
@@ -129,6 +133,7 @@ export interface AdminSummaryMetrics {
   todayFuelExpense: number;
   todayFuelCostPerKm: number;
   todayUberEarnings?: number;
+  todayUberRent?: number;
   todayTotalEarnings?: number;
 }
 
@@ -160,6 +165,7 @@ export interface DetailedReportItem {
   net_profit?: number;
   created_at: string;
   notes?: string;
+  uber_category?: UberEntryType;
 }
 
 export interface DutySessionReportItem {

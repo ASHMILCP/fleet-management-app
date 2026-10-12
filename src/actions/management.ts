@@ -116,9 +116,10 @@ export async function updateDriverAction(params: {
 export async function toggleVehicleActive(vehicleId: string, currentStatus: boolean) {
   try {
     const supabase = await createClient();
+    const newStatus = !currentStatus;
     const { error } = await supabase
       .from('vehicles')
-      .update({ is_active: !currentStatus })
+      .update({ status: newStatus ? 'ACTIVE' : 'INACTIVE' })
       .eq('id', vehicleId);
 
     if (error) throw error;
@@ -133,9 +134,10 @@ export async function toggleVehicleActive(vehicleId: string, currentStatus: bool
 export async function toggleCompanyActive(companyId: string, currentStatus: boolean) {
   try {
     const supabase = await createClient();
+    const newStatus = !currentStatus;
     const { error } = await supabase
       .from('companies')
-      .update({ is_active: !currentStatus })
+      .update({ status: newStatus ? 'ACTIVE' : 'INACTIVE' })
       .eq('id', companyId);
 
     if (error) throw error;

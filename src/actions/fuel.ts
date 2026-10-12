@@ -18,17 +18,32 @@ export async function createFuelLogAction(params: {
   try {
     const supabase = await createClient();
 
+    // Ensure driver exists in drivers table
+    if (params.driverId) {
+      const { data: drvCheck } = await supabase.from('drivers').select('id').eq('id', params.driverId).maybeSingle();
+      if (!drvCheck) {
+        await supabase.from('drivers').upsert({
+          id: params.driverId,
+          user_id: params.driverId,
+          driver_id_code: 'DRV-' + params.driverId.slice(0, 6).toUpperCase(),
+          status: 'ACTIVE',
+        }).then(() => null, () => null);
+      }
+    }
+
+    const cleanNotes = params.notes
+      ? (params.litersOrKg ? `${params.litersOrKg} L/Kg | ${params.notes}` : params.notes)
+      : (params.litersOrKg ? `${params.litersOrKg} L/Kg` : null);
+
     const { data, error } = await supabase
-      .from('fuel_logs')
+      .from('fuel_expenses')
       .insert({
         driver_id: params.driverId,
         vehicle_id: params.vehicleId || null,
-        duty_session_id: params.dutySessionId || null,
-        fuel_type: params.fuelType,
+        fuel_type: params.fuelType || 'CNG',
         amount: params.amount,
-        liters_or_kg: params.litersOrKg || null,
-        log_date: params.logDate || getTodayDateIST(),
-        notes: params.notes || null,
+        expense_date: params.logDate || getTodayDateIST(),
+        notes: cleanNotes,
       })
       .select()
       .single();

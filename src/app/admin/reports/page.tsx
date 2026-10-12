@@ -166,7 +166,17 @@ export default function AdminReportsPage() {
     [reportItems]
   );
   const uberEarningsTotal = useMemo(
-    () => reportItems.filter((i) => i.company_name === 'Uber Platform').reduce((sum, item) => sum + (item.earnings || 0), 0),
+    () =>
+      reportItems
+        .filter((i) => i.company_name === 'Uber Platform' || i.uber_category === 'UBER_EARNINGS')
+        .reduce((sum, item) => sum + (item.earnings || 0), 0),
+    [reportItems]
+  );
+  const uberRentTotal = useMemo(
+    () =>
+      reportItems
+        .filter((i) => i.company_name === 'Uber Rent' || i.uber_category === 'UBER_RENT')
+        .reduce((sum, item) => sum + (item.earnings || 0), 0),
     [reportItems]
   );
   const totalFuel = useMemo(
@@ -665,8 +675,8 @@ export default function AdminReportsPage() {
               {formatCurrencyINR(totalEarnings)}
             </div>
             <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-0.5 sm:mt-1 truncate">
-              {uberEarningsTotal > 0
-                ? `Trips + Uber (${formatCurrencyINR(uberEarningsTotal)})`
+              {uberEarningsTotal > 0 || uberRentTotal > 0
+                ? `Uber: ${formatCurrencyINR(uberEarningsTotal)} Earn | ${formatCurrencyINR(uberRentTotal)} Rent`
                 : 'Trips & Platform revenue'}
             </div>
           </div>
@@ -893,19 +903,28 @@ export default function AdminReportsPage() {
                           {item.vehicle_reg || <span className="text-slate-400">-</span>}
                         </td>
                         <td className="py-3.5 px-4 text-slate-800 font-medium">
-                          {item.company_name === 'Uber Platform' ? (
+                          {item.uber_category === 'UBER_RENT' || item.company_name === 'Uber Rent' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-950 text-white text-xs font-bold">
+                              <span>UBER</span>
+                              <span className="font-normal text-[10px] text-indigo-300">Rent</span>
+                            </span>
+                          ) : item.company_name === 'Uber Platform' || item.uber_category === 'UBER_EARNINGS' ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-black text-white text-xs font-bold">
                               <span>UBER</span>
-                              <span className="font-normal text-[10px] text-emerald-400">Platform</span>
+                              <span className="font-normal text-[10px] text-emerald-400">Earnings</span>
                             </span>
                           ) : (
                             item.company_name
                           )}
                         </td>
                         <td className="py-3.5 px-4">
-                          {item.company_name === 'Uber Platform' ? (
+                          {item.uber_category === 'UBER_RENT' || item.company_name === 'Uber Rent' ? (
+                            <Badge variant="purple" size="sm">
+                              UBER RENT
+                            </Badge>
+                          ) : item.company_name === 'Uber Platform' || item.uber_category === 'UBER_EARNINGS' ? (
                             <Badge variant="success" size="sm">
-                              PAYOUT
+                              UBER EARNINGS
                             </Badge>
                           ) : (
                             <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
@@ -1026,9 +1045,13 @@ export default function AdminReportsPage() {
                           <div className="text-[11px] text-slate-400 font-mono">{item.driver_phone}</div>
                         )}
                       </div>
-                      {item.company_name === 'Uber Platform' ? (
+                      {item.uber_category === 'UBER_RENT' || item.company_name === 'Uber Rent' ? (
+                        <Badge variant="purple" size="sm">
+                          UBER RENT
+                        </Badge>
+                      ) : item.company_name === 'Uber Platform' || item.uber_category === 'UBER_EARNINGS' ? (
                         <Badge variant="success" size="sm">
-                          PAYOUT
+                          UBER EARNINGS
                         </Badge>
                       ) : (
                         <Badge variant={item.trip_type === 'TWO_SIDE' ? 'purple' : 'info'} size="sm">
@@ -1039,10 +1062,15 @@ export default function AdminReportsPage() {
 
                     <div className="flex items-center justify-between text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        {item.company_name === 'Uber Platform' ? (
+                        {item.uber_category === 'UBER_RENT' || item.company_name === 'Uber Rent' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-950 text-white text-xs font-bold">
+                            <span>UBER</span>
+                            <span className="font-normal text-[10px] text-indigo-300">Rent</span>
+                          </span>
+                        ) : item.company_name === 'Uber Platform' || item.uber_category === 'UBER_EARNINGS' ? (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-black text-white text-xs font-bold">
                             <span>UBER</span>
-                            <span className="font-normal text-[10px] text-emerald-400">Platform</span>
+                            <span className="font-normal text-[10px] text-emerald-400">Earnings</span>
                           </span>
                         ) : (
                           <>

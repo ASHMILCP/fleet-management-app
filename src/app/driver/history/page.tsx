@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EditTripDialog } from '@/components/driver/EditTripDialog';
-import { Navigation, Building2, Calendar, FileText, RefreshCw, Download, Edit2 } from 'lucide-react';
+import { Navigation, Building2, Calendar, FileText, RefreshCw, Download, Edit2, Car } from 'lucide-react';
 
 export default function DriverHistoryPage() {
   const router = useRouter();
@@ -45,7 +45,11 @@ export default function DriverHistoryPage() {
   const companies = FleetStore.getCompanies();
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
 
-  const totalKm = trips.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
+  // Separate corporate KM from Uber entries
+  const corporateTrips = trips.filter(
+    (t) => !t.notes?.includes('[UBER_EARNINGS:') && !companyMap.get(t.company_id)?.toLowerCase().includes('uber')
+  );
+  const totalKm = corporateTrips.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
 
   const handleExportCsv = () => {
     if (trips.length === 0) {
@@ -142,6 +146,32 @@ export default function DriverHistoryPage() {
               <tbody className="divide-y divide-slate-100">
                 {trips.map((trip) => {
                   const companyName = companyMap.get(trip.company_id) || 'Corporate Client';
+                  const isUber = Boolean(
+                    (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
+                    companyName.toLowerCase().includes('uber') ||
+                    trip.id.startsWith('uber-')
+                  );
+
+                  let uberAmount = 0;
+                  let uberRides: number | null = null;
+                  let uberCategory: 'UBER_EARNINGS' | 'UBER_RENT' = 'UBER_EARNINGS';
+                  let uberNotes = trip.notes || '-';
+
+                  if (isUber && trip.notes && trip.notes.includes('[UBER_EARNINGS:')) {
+                    try {
+                      const match = trip.notes.match(/\[UBER_EARNINGS:(.*?)\]/);
+                      if (match && match[1]) {
+                        const parsed = JSON.parse(match[1]);
+                        if (parsed.amount) uberAmount = Number(parsed.amount);
+                        if (parsed.rides) uberRides = Number(parsed.rides);
+                        if (parsed.category === 'UBER_RENT') uberCategory = 'UBER_RENT';
+                        if (parsed.notes) uberNotes = parsed.notes;
+                      }
+                    } catch {
+                      // fallback
+                    }
+                  }
+
                   return (
                     <tr key={trip.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3.5 px-4 whitespace-nowrap">
@@ -149,44 +179,67 @@ export default function DriverHistoryPage() {
                         <div className="text-xs text-slate-400">{formatTimeIST(trip.created_at)}</div>
                       </td>
                       <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="w-4 h-4 text-blue-500" />
-                          <span className="font-medium text-slate-800">{companyName}</span>
-                        </div>
+                        {isUber ? (
+                          <div className="flex items-center gap-2">
+                            <Car className={`w-4 h-4 ${uberCategory === 'UBER_RENT' ? 'text-indigo-600' : 'text-emerald-600'}`} />
+                            <span className="font-bold text-slate-900">
+                              {uberCategory === 'UBER_RENT' ? 'Uber Rent' : 'Uber Earnings'}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-blue-500" />
+                            <span className="font-medium text-slate-800">{companyName}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
-                        <Badge
-                          variant={trip.trip_type === 'TWO_SIDE' ? 'purple' : 'info'}
-                          size="sm"
-                        >
-                          {trip.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
-                        </Badge>
+                        {isUber ? (
+                          <Badge variant={uberCategory === 'UBER_RENT' ? 'purple' : 'success'} size="sm">
+                            {uberCategory === 'UBER_RENT' ? 'UBER RENT' : 'UBER EARNINGS'}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant={trip.trip_type === 'TWO_SIDE' ? 'purple' : 'info'}
+                            size="sm"
+                          >
+                            {trip.trip_type === 'TWO_SIDE' ? '2-SIDE' : '1-SIDE'}
+                          </Badge>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-medium text-slate-700">
-                        {trip.one_side_km} km
+                        {isUber ? (uberRides ? `${uberRides} rides` : '-') : `${trip.one_side_km} km`}
                       </td>
                       <td className="py-3.5 px-4 text-center font-mono font-bold text-slate-500">
-                        x{trip.multiplier}
+                        {isUber ? '-' : `x${trip.multiplier}`}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                        {trip.total_km} km
+                        {isUber ? (
+                          <span className={uberCategory === 'UBER_RENT' ? 'text-indigo-700 font-black' : 'text-emerald-700 font-black'}>
+                            ₹{uberAmount > 0 ? uberAmount.toLocaleString('en-IN') : trip.total_km}
+                          </span>
+                        ) : (
+                          `${trip.total_km} km`
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">
-                        {trip.notes || '-'}
+                        {isUber ? uberNotes : (trip.notes || '-')}
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditingTrip(trip);
-                            setIsEditTripOpen(true);
-                          }}
-                          className="h-7 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          leftIcon={<Edit2 className="w-3 h-3" />}
-                        >
-                          Edit
-                        </Button>
+                        {!isUber && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setEditingTrip(trip);
+                              setIsEditTripOpen(true);
+                            }}
+                            className="h-7 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            leftIcon={<Edit2 className="w-3 h-3" />}
+                          >
+                            Edit
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );

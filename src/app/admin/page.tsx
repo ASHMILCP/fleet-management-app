@@ -172,6 +172,7 @@ export default function AdminDashboard() {
 
     let uberAmount = 0;
     let cleanNotes = trip.notes;
+    let uberCategory: 'UBER_EARNINGS' | 'UBER_RENT' = 'UBER_EARNINGS';
     if (isUber && trip.notes && trip.notes.includes('[UBER_EARNINGS:')) {
       try {
         const match = trip.notes.match(/\[UBER_EARNINGS:(.*?)\]/);
@@ -179,6 +180,7 @@ export default function AdminDashboard() {
           const parsed = JSON.parse(match[1]);
           if (parsed.amount) uberAmount = Number(parsed.amount);
           if (parsed.notes) cleanNotes = parsed.notes;
+          if (parsed.category === 'UBER_RENT') uberCategory = 'UBER_RENT';
         }
       } catch {
         // fallback
@@ -194,7 +196,7 @@ export default function AdminDashboard() {
       driver_name: driver?.full_name || 'Driver',
       driver_phone: driver?.phone,
       vehicle_reg: vehicle?.registration_number,
-      company_name: isUber ? 'Uber Platform' : (company?.name || 'Company'),
+      company_name: isUber ? (uberCategory === 'UBER_RENT' ? 'Uber Rent' : 'Uber Platform') : (company?.name || 'Company'),
       trip_type: trip.trip_type,
       one_side_km: trip.one_side_km,
       multiplier: trip.multiplier,
@@ -204,6 +206,7 @@ export default function AdminDashboard() {
       fuel_amount: 0,
       created_at: trip.created_at,
       notes: trip.notes,
+      uber_category: isUber ? uberCategory : undefined,
     });
     setIsEditTripOpen(true);
   };
@@ -357,8 +360,8 @@ export default function AdminDashboard() {
           title="Today's Fleet Revenue"
           value={formatCurrencyINR(metrics.todayTotalEarnings || 0)}
           subtitle={
-            metrics.todayUberEarnings && metrics.todayUberEarnings > 0
-              ? `Includes ${formatCurrencyINR(metrics.todayUberEarnings)} Uber`
+            (metrics.todayUberEarnings || 0) > 0 || (metrics.todayUberRent || 0) > 0
+              ? `Uber: ${formatCurrencyINR(metrics.todayUberEarnings || 0)} Earn | ${formatCurrencyINR(metrics.todayUberRent || 0)} Rent`
               : 'Corporate trips & Uber earnings'
           }
           icon={<Car className="w-5 h-5 text-emerald-500" />}
@@ -751,6 +754,7 @@ export default function AdminDashboard() {
 
                     let uberAmount = 0;
                     let uberRides: number | null = null;
+                    let uberCategory: 'UBER_EARNINGS' | 'UBER_RENT' = 'UBER_EARNINGS';
                     let displayNotes = trip.notes || '-';
 
                     if (isUber && trip.notes && trip.notes.includes('[UBER_EARNINGS:')) {
@@ -760,7 +764,14 @@ export default function AdminDashboard() {
                           const parsed = JSON.parse(match[1]);
                           if (parsed.amount) uberAmount = Number(parsed.amount);
                           if (parsed.rides) uberRides = Number(parsed.rides);
-                          displayNotes = parsed.notes || (uberRides ? `${uberRides} rides completed` : 'Uber Shift Payout');
+                          if (parsed.category === 'UBER_RENT') uberCategory = 'UBER_RENT';
+                          displayNotes =
+                            parsed.notes ||
+                            (uberRides
+                              ? `${uberRides} rides completed`
+                              : uberCategory === 'UBER_RENT'
+                              ? 'Uber Rent Income'
+                              : 'Uber Shift Payout');
                         }
                       } catch {
                         // fallback
@@ -792,10 +803,17 @@ export default function AdminDashboard() {
 
                         <td className="py-3.5 px-4">
                           {isUber ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200">
-                              <Car className="w-3.5 h-3.5" />
-                              <span>Uber Platform</span>
-                            </span>
+                            uberCategory === 'UBER_RENT' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs border border-indigo-200">
+                                <Car className="w-3.5 h-3.5" />
+                                <span>Uber Rent</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200">
+                                <Car className="w-3.5 h-3.5" />
+                                <span>Uber Earnings</span>
+                              </span>
+                            )
                           ) : (
                             <div>
                               <span className="font-medium text-slate-800">
@@ -822,8 +840,8 @@ export default function AdminDashboard() {
 
                         <td className="py-3.5 px-4">
                           {isUber ? (
-                            <Badge variant="success" size="sm">
-                              PLATFORM SHIFT
+                            <Badge variant={uberCategory === 'UBER_RENT' ? 'purple' : 'success'} size="sm">
+                              {uberCategory === 'UBER_RENT' ? 'UBER RENT' : 'UBER EARNINGS'}
                             </Badge>
                           ) : (
                             <Badge variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'} size="sm">
@@ -834,14 +852,25 @@ export default function AdminDashboard() {
 
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                           {isUber ? (
-                            <div>
-                              <span className="text-emerald-700 font-black text-sm">
-                                {formatCurrencyINR(uberAmount > 0 ? uberAmount : trip.total_km)}
-                              </span>
-                              <span className="text-[10px] text-emerald-600 font-normal block">
-                                Uber Earnings
-                              </span>
-                            </div>
+                            uberCategory === 'UBER_RENT' ? (
+                              <div>
+                                <span className="text-indigo-700 font-black text-sm">
+                                  {formatCurrencyINR(uberAmount > 0 ? uberAmount : trip.total_km)}
+                                </span>
+                                <span className="text-[10px] text-indigo-600 font-semibold block">
+                                  Uber Rent
+                                </span>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="text-emerald-700 font-black text-sm">
+                                  {formatCurrencyINR(uberAmount > 0 ? uberAmount : trip.total_km)}
+                                </span>
+                                <span className="text-[10px] text-emerald-600 font-semibold block">
+                                  Uber Earnings
+                                </span>
+                              </div>
+                            )
                           ) : (
                             <div>
                               <span className="text-slate-900 font-black text-sm">

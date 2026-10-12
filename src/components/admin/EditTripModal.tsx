@@ -56,6 +56,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
   // Uber entry specific states
   const [uberAmount, setUberAmount] = useState<string>('');
   const [uberRides, setUberRides] = useState<string>('');
+  const [uberCategory, setUberCategory] = useState<'UBER_EARNINGS' | 'UBER_RENT'>('UBER_EARNINGS');
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
@@ -64,6 +65,8 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
   const isUber = Boolean(
     item && (
       item.company_name === 'Uber Platform' ||
+      item.company_name === 'Uber Rent' ||
+      item.uber_category ||
       item.id.startsWith('uber-') ||
       (item.notes && item.notes.includes('[UBER_EARNINGS:'))
     )
@@ -178,12 +181,16 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
       // Check if Uber entry
       if (
         item.company_name === 'Uber Platform' ||
+        item.company_name === 'Uber Rent' ||
+        item.uber_category ||
         item.id.startsWith('uber-') ||
         (item.notes && item.notes.includes('[UBER_EARNINGS:'))
       ) {
         let amount = String(item.earnings || item.total_km || '');
         let rides = '';
         let cleanNotes = item.notes || '';
+        let category: 'UBER_EARNINGS' | 'UBER_RENT' =
+          item.uber_category || (item.company_name === 'Uber Rent' ? 'UBER_RENT' : 'UBER_EARNINGS');
 
         if (item.notes && item.notes.includes('[UBER_EARNINGS:')) {
           try {
@@ -193,6 +200,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
               if (parsed.amount) amount = String(parsed.amount);
               if (parsed.rides) rides = String(parsed.rides);
               if (parsed.notes) cleanNotes = parsed.notes;
+              if (parsed.category === 'UBER_RENT') category = 'UBER_RENT';
             }
           } catch {
             // fallback
@@ -200,6 +208,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
         }
         setUberAmount(amount);
         setUberRides(rides);
+        setUberCategory(category);
         setNotes(cleanNotes);
       } else {
         setTripType(item.trip_type || 'ONE_SIDE');
@@ -254,6 +263,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
         const uberPayload = {
           amount: parsedAmount,
           rides: parsedRides && !isNaN(parsedRides) ? parsedRides : null,
+          category: uberCategory,
           notes: cleanNotes || undefined,
         };
         const encodedNotes = `[UBER_EARNINGS:${JSON.stringify(uberPayload)}]`;
@@ -276,6 +286,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
             earnings_date: tripDate,
             amount: parsedAmount,
             rides_count: parsedRides,
+            category: uberCategory,
             notes: cleanNotes,
           }),
         ]);
@@ -566,39 +577,62 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
 
         {/* 4. UBER FINANCIALS (If Uber) */}
         {isUber ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+          <div className="space-y-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
             <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">
-                Uber Payout Amount (₹) *
+              <label className="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider flex items-center justify-between">
+                <span>Uber Option Type *</span>
+                <Badge variant={uberCategory === 'UBER_RENT' ? 'purple' : 'success'} size="sm">
+                  {uberCategory === 'UBER_RENT' ? 'UBER RENT' : 'UBER EARNINGS'}
+                </Badge>
               </label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">₹</span>
-                <input
-                  type="number"
-                  step="any"
-                  min="1"
-                  value={uberAmount}
-                  onChange={(e) => setUberAmount(e.target.value)}
-                  placeholder="e.g. 1450"
-                  className="w-full pl-7 pr-3.5 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-base font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  required
-                />
-              </div>
+              <select
+                value={uberCategory}
+                onChange={(e) => setUberCategory(e.target.value as 'UBER_EARNINGS' | 'UBER_RENT')}
+                className={`w-full px-3.5 py-2.5 bg-white border rounded-xl text-slate-900 text-sm font-bold focus:ring-2 focus:outline-none transition-colors ${
+                  uberCategory === 'UBER_RENT'
+                    ? 'border-indigo-300 focus:ring-indigo-500 text-indigo-950'
+                    : 'border-emerald-300 focus:ring-emerald-500 text-emerald-950'
+                }`}
+              >
+                <option value="UBER_EARNINGS">Uber Earnings</option>
+                <option value="UBER_RENT">Uber Rent</option>
+              </select>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">
-                Completed Rides (Optional)
-              </label>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                value={uberRides}
-                onChange={(e) => setUberRides(e.target.value)}
-                placeholder="e.g. 6"
-                className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-base font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">
+                  {uberCategory === 'UBER_RENT' ? 'Uber Rent Amount (₹) *' : 'Uber Earnings Amount (₹) *'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">₹</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="1"
+                    value={uberAmount}
+                    onChange={(e) => setUberAmount(e.target.value)}
+                    placeholder="e.g. 1450"
+                    className="w-full pl-7 pr-3.5 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-base font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">
+                  Completed Rides (Optional)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={uberRides}
+                  onChange={(e) => setUberRides(e.target.value)}
+                  placeholder="e.g. 6"
+                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-base font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
         ) : (

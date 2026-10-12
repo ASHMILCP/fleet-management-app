@@ -36,8 +36,8 @@ export async function updateSession(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
 
-  // If no demo role and credentials are placeholder/sample, redirect protected routes to /login
-  if (!demoRole || !supabaseUrl || supabaseUrl.includes('sample-fleet-app') || supabaseUrl.includes('your-project-id')) {
+  // If credentials are placeholder/sample, redirect protected routes to /login
+  if (!supabaseUrl || supabaseUrl.includes('sample-fleet-app') || supabaseUrl.includes('your-project-id')) {
     if (pathname.startsWith('/admin') || pathname.startsWith('/driver')) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
