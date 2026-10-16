@@ -113,9 +113,11 @@ export default function DriverDashboard() {
   const handleDeleteUber = async (uberId: string) => {
     if (!window.confirm('Are you sure you want to delete this Uber entry?')) return;
     try {
+      const cleanId = uberId.startsWith('uber-') ? uberId.replace('uber-', '') : uberId;
       await Promise.all([
-        FleetStore.deleteUberEarningAsync(uberId),
-        deleteTripAction(uberId),
+        FleetStore.deleteTripAsync(cleanId),
+        FleetStore.deleteUberEarningAsync(cleanId),
+        deleteTripAction(cleanId),
       ]);
       handleStateChange();
     } catch (err: any) {

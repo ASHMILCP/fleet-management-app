@@ -198,10 +198,12 @@ export async function deleteTripAction(tripId: string) {
     const supabase = await createClient();
     const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
 
-    await Promise.all([
-      supabase.from('trips').delete().eq('id', cleanId),
-      supabase.from('uber_earnings').delete().eq('id', cleanId).then(() => null, () => null),
-    ]);
+    const { error: tripErr } = await supabase.from('trips').delete().eq('id', cleanId);
+    if (tripErr) {
+      console.error('Supabase deleteTripAction error:', tripErr);
+      return { success: false, error: tripErr.message };
+    }
+    await supabase.from('uber_earnings').delete().eq('id', cleanId).then(() => null, () => null);
 
     revalidatePath('/driver');
     revalidatePath('/driver/history');

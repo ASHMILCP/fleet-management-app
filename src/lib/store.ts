@@ -46,6 +46,25 @@ const STORAGE_KEYS = {
   LOGIN_AUDITS: 'fleet_login_audits_v1',
 };
 
+const SCHEMA_VERSION_KEY = 'fleet_schema_version_v2';
+const CURRENT_SCHEMA_VERSION = '2026-10-16-v2';
+
+// Auto-purge stale client caches on boot
+if (typeof window !== 'undefined') {
+  try {
+    const savedVersion = localStorage.getItem(SCHEMA_VERSION_KEY);
+    if (savedVersion !== CURRENT_SCHEMA_VERSION) {
+      localStorage.removeItem(STORAGE_KEYS.TRIPS);
+      localStorage.removeItem(STORAGE_KEYS.UBER_EARNINGS);
+      localStorage.removeItem(STORAGE_KEYS.FUEL_LOGS);
+      localStorage.removeItem(STORAGE_KEYS.INITIALIZED);
+      localStorage.setItem(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+    }
+  } catch (err) {
+    console.warn('Storage schema reset error:', err);
+  }
+}
+
 export function getDeletedEntityIds(): Set<string> {
   const list = getItem<string[]>(STORAGE_KEYS.DELETED_ENTITY_IDS, []);
   return new Set(list);
@@ -481,9 +500,18 @@ export class FleetStore {
       // 5. TRIPS SYNC & MERGE (Supabase is single source of truth)
       if (Array.isArray(tRes.data)) {
         const deletedIds = getDeletedEntityIds();
-        const cloudTrips: Trip[] = tRes.data
-          .filter((row: any) => !deletedIds.has(row.id))
-          .map((row: any) => ({
+        const seenSignatures = new Set<string>();
+        const cloudTrips: Trip[] = [];
+        for (const row of tRes.data) {
+          if (deletedIds.has(row.id)) continue;
+          const isUber = row.notes && String(row.notes).includes('[UBER_EARNINGS:');
+          const sig = isUber
+            ? `uber_${row.driver_id}_${row.trip_date}_${row.notes}`
+            : `trip_${row.driver_id}_${row.company_id}_${row.trip_date}_${row.trip_time}_${row.entered_km}`;
+          if (seenSignatures.has(sig)) continue;
+          seenSignatures.add(sig);
+
+          cloudTrips.push({
             id: row.id,
             driver_id: row.driver_id,
             company_id: row.company_id,
@@ -497,38 +525,46 @@ export class FleetStore {
             trip_time: row.trip_time || undefined,
             notes: row.notes,
             created_at: row.created_at || new Date().toISOString(),
-          }));
+          });
+        }
         setItem(STORAGE_KEYS.TRIPS, cloudTrips);
       }
 
       // 6. FUEL LOGS SYNC & MERGE (Supabase is single source of truth)
       if (Array.isArray(fRes.data)) {
         const deletedIds = getDeletedEntityIds();
-        const cloudFuel: FuelLog[] = fRes.data
-          .filter((row: any) => !deletedIds.has(row.id))
-          .map((row: any) => {
-            let liters = row.liters_or_kg || row.quantity;
-            let cleanNotes = row.notes;
-            if (!liters && row.notes) {
-              const lMatch = String(row.notes).match(/^([\d.]+)\s*(?:L|Kg|L\/Kg)\s*(?:\|\s*(.*))?$/i);
-              if (lMatch) {
-                liters = parseFloat(lMatch[1]);
-                cleanNotes = lMatch[2] || undefined;
-              }
+        const seenFuelSignatures = new Set<string>();
+        const cloudFuel: FuelLog[] = [];
+        for (const row of fRes.data) {
+          if (deletedIds.has(row.id)) continue;
+          let liters = row.liters_or_kg || row.quantity;
+          let cleanNotes = row.notes;
+          if (!liters && row.notes) {
+            const lMatch = String(row.notes).match(/^([\d.]+)\s*(?:L|Kg|L\/Kg)\s*(?:\|\s*(.*))?$/i);
+            if (lMatch) {
+              liters = parseFloat(lMatch[1]);
+              cleanNotes = lMatch[2] || undefined;
             }
-            return {
-              id: row.id,
-              driver_id: row.driver_id,
-              vehicle_id: row.vehicle_id,
-              duty_session_id: row.duty_session_id,
-              fuel_type: row.fuel_type || 'CNG',
-              amount: Number(row.amount || 0),
-              liters_or_kg: liters || null,
-              log_date: row.expense_date || row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-              notes: cleanNotes,
-              created_at: row.created_at || new Date().toISOString(),
-            };
+          }
+          const fDate = row.expense_date || row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST());
+          const fAmt = Number(row.amount || 0);
+          const fSig = `${row.driver_id}_${fDate}_${row.fuel_type}_${fAmt}`;
+          if (seenFuelSignatures.has(fSig)) continue;
+          seenFuelSignatures.add(fSig);
+
+          cloudFuel.push({
+            id: row.id,
+            driver_id: row.driver_id,
+            vehicle_id: row.vehicle_id,
+            duty_session_id: row.duty_session_id,
+            fuel_type: row.fuel_type || 'CNG',
+            amount: fAmt,
+            liters_or_kg: liters || null,
+            log_date: fDate,
+            notes: cleanNotes,
+            created_at: row.created_at || new Date().toISOString(),
           });
+        }
         setItem(STORAGE_KEYS.FUEL_LOGS, cloudFuel);
       }
 
@@ -538,6 +574,7 @@ export class FleetStore {
       const deletedIds = getDeletedEntityIds();
 
       const cloudUberMap = new Map<string, UberEarning>();
+      const seenUberSignatures = new Set<string>();
 
       // 7a. Parse Uber records from Supabase trips table
       const tripsData = Array.isArray(tRes.data) ? tRes.data : [];
@@ -547,7 +584,11 @@ export class FleetStore {
         if (isUber) {
           const parsed = parseUberTrip(t);
           if (parsed && !deletedIds.has(parsed.id)) {
-            cloudUberMap.set(parsed.id, parsed);
+            const sig = `${parsed.driver_id}_${parsed.earnings_date}_${parsed.category}_${parsed.amount}`;
+            if (!seenUberSignatures.has(sig)) {
+              seenUberSignatures.add(sig);
+              cloudUberMap.set(parsed.id, parsed);
+            }
           }
         }
       }
@@ -557,18 +598,25 @@ export class FleetStore {
         for (const row of uRes.data) {
           if (!row || !row.id || deletedIds.has(row.id)) continue;
           const isRent = (row.notes && String(row.notes).toLowerCase().includes('rent')) || row.category === 'UBER_RENT';
-          cloudUberMap.set(row.id, {
-            id: row.id,
-            driver_id: row.driver_id,
-            vehicle_id: row.vehicle_id,
-            duty_session_id: row.duty_session_id,
-            amount: Number(row.amount || 0),
-            rides_count: row.rides_count || null,
-            category: (row.category || (isRent ? 'UBER_RENT' : 'UBER_EARNINGS')) as UberEntryType,
-            earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-            notes: row.notes,
-            created_at: row.created_at || new Date().toISOString(),
-          });
+          const cat = (row.category || (isRent ? 'UBER_RENT' : 'UBER_EARNINGS')) as UberEntryType;
+          const amt = Number(row.amount || 0);
+          const eDate = row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST());
+          const sig = `${row.driver_id}_${eDate}_${cat}_${amt}`;
+          if (!seenUberSignatures.has(sig)) {
+            seenUberSignatures.add(sig);
+            cloudUberMap.set(row.id, {
+              id: row.id,
+              driver_id: row.driver_id,
+              vehicle_id: row.vehicle_id,
+              duty_session_id: row.duty_session_id,
+              amount: amt,
+              rides_count: row.rides_count || null,
+              category: cat,
+              earnings_date: eDate,
+              notes: row.notes,
+              created_at: row.created_at || new Date().toISOString(),
+            });
+          }
         }
       }
 
@@ -1417,7 +1465,19 @@ export class FleetStore {
 
   // Trips (Cloud-First)
   static getTrips(): Trip[] {
-    return getItem<Trip[]>(STORAGE_KEYS.TRIPS, INITIAL_TRIPS);
+    const deletedIds = getDeletedEntityIds();
+    const trips = getItem<Trip[]>(STORAGE_KEYS.TRIPS, INITIAL_TRIPS);
+    const seen = new Set<string>();
+    return trips.filter((t) => {
+      if (deletedIds.has(t.id)) return false;
+      const isUber = t.notes && String(t.notes).includes('[UBER_EARNINGS:');
+      const sig = isUber
+        ? `uber_${t.driver_id}_${t.trip_date}_${t.notes}`
+        : `trip_${t.driver_id}_${t.company_id}_${t.trip_date}_${t.trip_time}_${t.one_side_km}`;
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    });
   }
 
   static async fetchTripsAsync(): Promise<Trip[]> {
@@ -1428,20 +1488,34 @@ export class FleetStore {
       const supabase = createClient();
       const { data, error } = await supabase.from('trips').select('*').order('created_at', { ascending: false });
       if (!error && Array.isArray(data)) {
-        const cloudTrips: Trip[] = data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          company_id: row.company_id,
-          vehicle_id: row.vehicle_id,
-          duty_session_id: row.duty_session_id,
-          one_side_km: Number(row.entered_km || row.one_side_km || 0),
-          trip_type: row.trip_type || 'ONE_SIDE',
-          multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
-          total_km: Number(row.total_km || 0),
-          trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-          notes: row.notes,
-          created_at: row.created_at || new Date().toISOString(),
-        }));
+        const deletedIds = getDeletedEntityIds();
+        const seenSignatures = new Set<string>();
+        const cloudTrips: Trip[] = [];
+        for (const row of data) {
+          if (deletedIds.has(row.id)) continue;
+          const isUber = row.notes && String(row.notes).includes('[UBER_EARNINGS:');
+          const sig = isUber
+            ? `uber_${row.driver_id}_${row.trip_date}_${row.notes}`
+            : `trip_${row.driver_id}_${row.company_id}_${row.trip_date}_${row.trip_time}_${row.entered_km}`;
+          if (seenSignatures.has(sig)) continue;
+          seenSignatures.add(sig);
+
+          cloudTrips.push({
+            id: row.id,
+            driver_id: row.driver_id,
+            company_id: row.company_id,
+            vehicle_id: row.vehicle_id,
+            duty_session_id: row.duty_session_id,
+            one_side_km: Number(row.entered_km || row.one_side_km || 0),
+            trip_type: row.trip_type || 'ONE_SIDE',
+            multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
+            total_km: Number(row.total_km || 0),
+            trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+            trip_time: row.trip_time || undefined,
+            notes: row.notes,
+            created_at: row.created_at || new Date().toISOString(),
+          });
+        }
         setItem(STORAGE_KEYS.TRIPS, cloudTrips);
         return cloudTrips;
       }
@@ -1719,7 +1793,16 @@ export class FleetStore {
 
   // Fuel Logs (Cloud-First)
   static getFuelLogs(): FuelLog[] {
-    return getItem<FuelLog[]>(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
+    const deletedIds = getDeletedEntityIds();
+    const fuels = getItem<FuelLog[]>(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
+    const seen = new Set<string>();
+    return fuels.filter((f) => {
+      if (deletedIds.has(f.id)) return false;
+      const sig = `${f.driver_id}_${f.log_date}_${f.fuel_type}_${f.amount}`;
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    });
   }
 
   static async fetchFuelLogsAsync(): Promise<FuelLog[]> {
@@ -1865,7 +1948,16 @@ export class FleetStore {
 
   // Uber Earnings (Cloud-First with Dual-Layer Persistence)
   static getUberEarnings(): UberEarning[] {
-    return getItem<UberEarning[]>(STORAGE_KEYS.UBER_EARNINGS, INITIAL_UBER_EARNINGS);
+    const deletedIds = getDeletedEntityIds();
+    const ubers = getItem<UberEarning[]>(STORAGE_KEYS.UBER_EARNINGS, INITIAL_UBER_EARNINGS);
+    const seen = new Set<string>();
+    return ubers.filter((u) => {
+      if (deletedIds.has(u.id)) return false;
+      const sig = `${u.driver_id}_${u.earnings_date}_${u.category}_${u.amount}`;
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    });
   }
 
   static async fetchUberEarningsAsync(): Promise<UberEarning[]> {
@@ -1886,6 +1978,7 @@ export class FleetStore {
       const deletedIds = getDeletedEntityIds();
 
       const cloudMap = new Map<string, UberEarning>();
+      const seenUberSignatures = new Set<string>();
 
       // 1. From trips table (authoritative)
       if (Array.isArray(tRes.data)) {
@@ -1893,7 +1986,13 @@ export class FleetStore {
           if (deletedIds.has(t.id)) continue;
           if (t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'))) {
             const parsed = parseUberTrip(t);
-            if (parsed && !deletedIds.has(parsed.id)) cloudMap.set(parsed.id, parsed);
+            if (parsed && !deletedIds.has(parsed.id)) {
+              const sig = `${parsed.driver_id}_${parsed.earnings_date}_${parsed.category}_${parsed.amount}`;
+              if (!seenUberSignatures.has(sig)) {
+                seenUberSignatures.add(sig);
+                cloudMap.set(parsed.id, parsed);
+              }
+            }
           }
         }
       }
@@ -1902,17 +2001,26 @@ export class FleetStore {
       if (uRes && Array.isArray(uRes.data)) {
         for (const row of uRes.data) {
           if (!row || !row.id || deletedIds.has(row.id)) continue;
-          cloudMap.set(row.id, {
-            id: row.id,
-            driver_id: row.driver_id,
-            vehicle_id: row.vehicle_id,
-            duty_session_id: row.duty_session_id,
-            amount: Number(row.amount || 0),
-            rides_count: row.rides_count || null,
-            earnings_date: row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-            notes: row.notes,
-            created_at: row.created_at || new Date().toISOString(),
-          });
+          const isRent = (row.notes && String(row.notes).toLowerCase().includes('rent')) || row.category === 'UBER_RENT';
+          const cat = (row.category || (isRent ? 'UBER_RENT' : 'UBER_EARNINGS')) as UberEntryType;
+          const amt = Number(row.amount || 0);
+          const eDate = row.earnings_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST());
+          const sig = `${row.driver_id}_${eDate}_${cat}_${amt}`;
+          if (!seenUberSignatures.has(sig)) {
+            seenUberSignatures.add(sig);
+            cloudMap.set(row.id, {
+              id: row.id,
+              driver_id: row.driver_id,
+              vehicle_id: row.vehicle_id,
+              duty_session_id: row.duty_session_id,
+              amount: amt,
+              rides_count: row.rides_count || null,
+              category: cat,
+              earnings_date: eDate,
+              notes: row.notes,
+              created_at: row.created_at || new Date().toISOString(),
+            });
+          }
         }
       }
 
@@ -2599,6 +2707,8 @@ export class FleetStore {
 
         const assignedFuelDates = new Set<string>();
         const seenUberIds = new Set<string>();
+        const seenUberSignatures = new Set<string>();
+        const seenTripSignatures = new Set<string>();
         const items: DetailedReportItem[] = [];
 
         for (const t of filteredTrips) {
@@ -2607,11 +2717,15 @@ export class FleetStore {
           const vehicle = t.vehicle_id ? vehicleMap.get(t.vehicle_id) : undefined;
 
           if (isUber) {
-            seenUberIds.add(t.id);
             const parsed = parseUberTrip(t);
             const amt = parsed?.amount || Number(t.entered_km || 0);
-
             const isRent = parsed?.category === 'UBER_RENT';
+            const cat = parsed?.category || (isRent ? 'UBER_RENT' : 'UBER_EARNINGS');
+            const uberSig = `${t.driver_id}_${t.trip_date}_${cat}_${amt}`;
+            if (seenUberSignatures.has(uberSig)) continue;
+            seenUberSignatures.add(uberSig);
+            seenUberIds.add(t.id);
+
             items.push({
               id: `uber-${t.id}`,
               driver_id: t.driver_id,
@@ -2633,9 +2747,12 @@ export class FleetStore {
               net_profit: amt,
               created_at: t.created_at || new Date().toISOString(),
               notes: parsed?.notes || (parsed?.rides_count ? `${parsed.rides_count} rides logged` : (isRent ? 'Uber Vehicle Rent' : 'Uber Platform Earnings')),
-              uber_category: parsed?.category || (isRent ? 'UBER_RENT' : 'UBER_EARNINGS'),
+              uber_category: cat,
             });
           } else {
+            const tripSig = `${t.driver_id}_${t.company_id}_${t.trip_date}_${t.trip_time}_${t.entered_km}`;
+            if (seenTripSignatures.has(tripSig)) continue;
+            seenTripSignatures.add(tripSig);
             const company = companyMap.get(t.company_id);
             const dateKey = `${t.driver_id}_${t.trip_date}`;
             let fuelOnDate = 0;
@@ -2762,6 +2879,11 @@ export class FleetStore {
             const driver = driverMap.get(u.driver_id);
             const vehicle = u.vehicle_id ? vehicleMap.get(u.vehicle_id) : undefined;
             const amt = Number(u.amount || 0);
+            const uDate = u.earnings_date || (u.created_at ? u.created_at.split('T')[0] : getTodayDateIST());
+            const cat = u.category || 'UBER_EARNINGS';
+            const sig = `${u.driver_id}_${uDate}_${cat}_${amt}`;
+            if (seenUberSignatures.has(sig)) continue;
+            seenUberSignatures.add(sig);
             items.push({
               id: `uber-${u.id}`,
               driver_id: u.driver_id,
