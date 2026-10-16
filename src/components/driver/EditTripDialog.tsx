@@ -137,6 +137,7 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
 
       await Promise.all([
         FleetStore.deleteTripAsync(cleanTripId),
+        FleetStore.deleteUberEarningAsync(cleanTripId),
         deleteTripAction(cleanTripId),
       ]);
 

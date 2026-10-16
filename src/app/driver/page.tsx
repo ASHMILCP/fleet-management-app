@@ -11,6 +11,8 @@ import { EditTripDialog } from '@/components/driver/EditTripDialog';
 import { AddFuelDialog } from '@/components/driver/AddFuelDialog';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { TodaySummaryCard } from '@/components/driver/TodaySummaryCard';
+import { deleteTripAction } from '@/actions/trips';
+import { deleteFuelLogAction } from '@/actions/fuel';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -111,7 +113,10 @@ export default function DriverDashboard() {
   const handleDeleteUber = async (uberId: string) => {
     if (!window.confirm('Are you sure you want to delete this Uber entry?')) return;
     try {
-      await FleetStore.deleteUberEarningAsync(uberId);
+      await Promise.all([
+        FleetStore.deleteUberEarningAsync(uberId),
+        deleteTripAction(uberId),
+      ]);
       handleStateChange();
     } catch (err: any) {
       alert('Could not delete Uber entry: ' + (err.message || 'Error'));
@@ -121,7 +126,10 @@ export default function DriverDashboard() {
   const handleDeleteFuel = async (fuelId: string) => {
     if (!window.confirm('Are you sure you want to delete this fuel record?')) return;
     try {
-      await FleetStore.deleteFuelLogAsync(fuelId);
+      await Promise.all([
+        FleetStore.deleteFuelLogAsync(fuelId),
+        deleteFuelLogAction(fuelId),
+      ]);
       handleStateChange();
     } catch (err: any) {
       alert('Could not delete fuel entry: ' + (err.message || 'Error'));

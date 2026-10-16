@@ -57,3 +57,21 @@ export async function createFuelLogAction(params: {
     return { success: false, error: error.message };
   }
 }
+
+export async function deleteFuelLogAction(fuelId: string) {
+  try {
+    const supabase = await createClient();
+    const cleanId = fuelId.startsWith('fuel-') ? fuelId.replace('fuel-', '') : fuelId;
+
+    const { error } = await supabase.from('fuel_expenses').delete().eq('id', cleanId);
+    if (error) throw error;
+
+    revalidatePath('/driver');
+    revalidatePath('/driver/history');
+    revalidatePath('/admin');
+    revalidatePath('/admin/reports');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

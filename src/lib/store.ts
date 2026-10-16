@@ -41,9 +41,35 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'fleet_current_user_v1',
   INITIALIZED: 'fleet_initialized_v1',
   DELETED_DRIVERS: 'fleet_deleted_drivers_v1',
+  DELETED_ENTITY_IDS: 'fleet_deleted_entity_ids_v1',
   ADMIN_PROFILE: 'fleet_admin_profile_v1',
   LOGIN_AUDITS: 'fleet_login_audits_v1',
 };
+
+export function getDeletedEntityIds(): Set<string> {
+  const list = getItem<string[]>(STORAGE_KEYS.DELETED_ENTITY_IDS, []);
+  return new Set(list);
+}
+
+export function markEntityDeleted(id: string): void {
+  if (!id) return;
+  const cleanId = id.startsWith('uber-')
+    ? id.replace('uber-', '')
+    : (id.startsWith('fuel-') ? id.replace('fuel-', '') : id);
+  const current = getItem<string[]>(STORAGE_KEYS.DELETED_ENTITY_IDS, []);
+  let changed = false;
+  if (!current.includes(cleanId)) {
+    current.push(cleanId);
+    changed = true;
+  }
+  if (!current.includes(id)) {
+    current.push(id);
+    changed = true;
+  }
+  if (changed) {
+    setItem(STORAGE_KEYS.DELETED_ENTITY_IDS, current.slice(-500));
+  }
+}
 
 // Safe LocalStorage helpers
 function getItem<T>(key: string, fallback: T): T {
@@ -436,110 +462,100 @@ export class FleetStore {
       // 4. DUTY SESSIONS SYNC & MERGE
       const localSessions = this.getDutySessions();
       if (Array.isArray(dRes.data)) {
-        const cloudSessions: DutySession[] = dRes.data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          vehicle_id: row.vehicle_id || localDrivers.find((d) => d.id === row.driver_id)?.assigned_vehicle_id,
-          start_time: row.start_time,
-          end_time: row.end_time || null,
-          status: row.end_time ? 'COMPLETED' : 'ACTIVE',
-          notes: row.notes,
-          created_at: row.created_at || row.start_time || new Date().toISOString(),
-        }));
-        const cloudSessionIds = new Set(cloudSessions.map((s) => s.id));
-        const unsyncedSessions = localSessions.filter((s) => !cloudSessionIds.has(s.id));
-        for (const us of unsyncedSessions) {
-          supabase.from('duty_sessions').upsert({
-            id: us.id,
-            driver_id: us.driver_id,
-            session_date: (us.start_time ? us.start_time.split('T')[0] : getTodayDateIST()),
-            start_time: us.start_time,
-            end_time: us.end_time || null,
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading duty session to Supabase:', error);
-          });
-        }
-        const mergedSessions = [...cloudSessions, ...unsyncedSessions];
-        setItem(STORAGE_KEYS.DUTY_SESSIONS, mergedSessions);
+        const deletedIds = getDeletedEntityIds();
+        const cloudSessions: DutySession[] = dRes.data
+          .filter((row: any) => !deletedIds.has(row.id))
+          .map((row: any) => ({
+            id: row.id,
+            driver_id: row.driver_id,
+            vehicle_id: row.vehicle_id || localDrivers.find((d) => d.id === row.driver_id)?.assigned_vehicle_id,
+            start_time: row.start_time,
+            end_time: row.end_time || null,
+            status: row.end_time ? 'COMPLETED' : 'ACTIVE',
+            notes: row.notes,
+            created_at: row.created_at || row.start_time || new Date().toISOString(),
+          }));
+        setItem(STORAGE_KEYS.DUTY_SESSIONS, cloudSessions);
       }
 
-      // 5. TRIPS SYNC & MERGE
-      const localTrips = this.getTrips();
+      // 5. TRIPS SYNC & MERGE (Supabase is single source of truth)
       if (Array.isArray(tRes.data)) {
-        const cloudTrips: Trip[] = tRes.data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          company_id: row.company_id,
-          vehicle_id: row.vehicle_id,
-          duty_session_id: row.duty_session_id,
-          one_side_km: row.entered_km || row.one_side_km || (row.total_km ? (row.trip_type === 'ONE_SIDE' ? row.total_km / 2 : row.total_km) : 0),
-          trip_type: row.trip_type || 'ONE_SIDE',
-          multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
-          total_km: Number(row.total_km || 0),
-          trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-          trip_time: row.trip_time || undefined,
-          notes: row.notes,
-          created_at: row.created_at || new Date().toISOString(),
-        }));
-        // Supabase is the single source of truth for trips.
+        const deletedIds = getDeletedEntityIds();
+        const cloudTrips: Trip[] = tRes.data
+          .filter((row: any) => !deletedIds.has(row.id))
+          .map((row: any) => ({
+            id: row.id,
+            driver_id: row.driver_id,
+            company_id: row.company_id,
+            vehicle_id: row.vehicle_id,
+            duty_session_id: row.duty_session_id,
+            one_side_km: Number(row.entered_km || row.one_side_km || (row.total_km ? (row.trip_type === 'ONE_SIDE' ? row.total_km / 2 : row.total_km) : 0)),
+            trip_type: row.trip_type || 'ONE_SIDE',
+            multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
+            total_km: Number(row.total_km || 0),
+            trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+            trip_time: row.trip_time || undefined,
+            notes: row.notes,
+            created_at: row.created_at || new Date().toISOString(),
+          }));
         setItem(STORAGE_KEYS.TRIPS, cloudTrips);
       }
 
-      // 6. FUEL LOGS SYNC & MERGE
-      const localFuel = this.getFuelLogs();
+      // 6. FUEL LOGS SYNC & MERGE (Supabase is single source of truth)
       if (Array.isArray(fRes.data)) {
-        const cloudFuel: FuelLog[] = fRes.data.map((row: any) => ({
-          id: row.id,
-          driver_id: row.driver_id,
-          vehicle_id: row.vehicle_id,
-          duty_session_id: row.duty_session_id,
-          fuel_type: row.fuel_type || 'CNG',
-          amount: Number(row.amount || 0),
-          liters_or_kg: row.liters_or_kg || row.quantity,
-          log_date: row.expense_date || row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-          notes: row.notes,
-          created_at: row.created_at || new Date().toISOString(),
-        }));
-        const cloudFuelIds = new Set(cloudFuel.map((f) => f.id));
-        const unsyncedFuel = localFuel.filter((f) => !cloudFuelIds.has(f.id));
-        for (const uf of unsyncedFuel) {
-          supabase.from('fuel_expenses').upsert({
-            id: uf.id,
-            driver_id: uf.driver_id,
-            vehicle_id: uf.vehicle_id || null,
-            fuel_type: uf.fuel_type || 'CNG',
-            amount: uf.amount,
-            expense_date: uf.log_date || getTodayDateIST(),
-            notes: uf.notes || null,
-          }).then(({ error }) => {
-            if (error) console.error('Error auto-uploading fuel log to Supabase:', error);
+        const deletedIds = getDeletedEntityIds();
+        const cloudFuel: FuelLog[] = fRes.data
+          .filter((row: any) => !deletedIds.has(row.id))
+          .map((row: any) => {
+            let liters = row.liters_or_kg || row.quantity;
+            let cleanNotes = row.notes;
+            if (!liters && row.notes) {
+              const lMatch = String(row.notes).match(/^([\d.]+)\s*(?:L|Kg|L\/Kg)\s*(?:\|\s*(.*))?$/i);
+              if (lMatch) {
+                liters = parseFloat(lMatch[1]);
+                cleanNotes = lMatch[2] || undefined;
+              }
+            }
+            return {
+              id: row.id,
+              driver_id: row.driver_id,
+              vehicle_id: row.vehicle_id,
+              duty_session_id: row.duty_session_id,
+              fuel_type: row.fuel_type || 'CNG',
+              amount: Number(row.amount || 0),
+              liters_or_kg: liters || null,
+              log_date: row.expense_date || row.log_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+              notes: cleanNotes,
+              created_at: row.created_at || new Date().toISOString(),
+            };
           });
-        }
-        const mergedFuel = [...cloudFuel, ...unsyncedFuel];
-        setItem(STORAGE_KEYS.FUEL_LOGS, mergedFuel);
+        setItem(STORAGE_KEYS.FUEL_LOGS, cloudFuel);
       }
 
-      // 7. UBER EARNINGS SYNC & MERGE (Dual cloud-persistence: trips table + uber_earnings table)
-      const localUber = this.getUberEarnings();
+      // 7. UBER EARNINGS SYNC & MERGE (Supabase cloud trips is authoritative)
       let uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
       const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+      const deletedIds = getDeletedEntityIds();
 
       const cloudUberMap = new Map<string, UberEarning>();
 
       // 7a. Parse Uber records from Supabase trips table
       const tripsData = Array.isArray(tRes.data) ? tRes.data : [];
       for (const t of tripsData) {
+        if (deletedIds.has(t.id)) continue;
         const isUber = t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'));
         if (isUber) {
           const parsed = parseUberTrip(t);
-          if (parsed) cloudUberMap.set(parsed.id, parsed);
+          if (parsed && !deletedIds.has(parsed.id)) {
+            cloudUberMap.set(parsed.id, parsed);
+          }
         }
       }
 
       // 7b. Parse from uber_earnings table if present
       if (uRes && Array.isArray(uRes.data)) {
         for (const row of uRes.data) {
-          if (!row || !row.id) continue;
+          if (!row || !row.id || deletedIds.has(row.id)) continue;
           const isRent = (row.notes && String(row.notes).toLowerCase().includes('rent')) || row.category === 'UBER_RENT';
           cloudUberMap.set(row.id, {
             id: row.id,
@@ -556,85 +572,9 @@ export class FleetStore {
         }
       }
 
-      // 7c. Automatically upload any unsynced local Uber records to Supabase cloud
-      for (const uu of localUber) {
-        if (!cloudUberMap.has(uu.id)) {
-          const uberCategory = uu.category || (uu.notes?.toLowerCase().includes('rent') ? 'UBER_RENT' : 'UBER_EARNINGS');
-          const encodedNotes = `[UBER_EARNINGS:${JSON.stringify({
-            amount: uu.amount,
-            rides: uu.rides_count || 1,
-            category: uberCategory,
-            notes: uu.notes || (uberCategory === 'UBER_RENT' ? 'Uber Rent' : 'Uber Earnings'),
-          })}]`;
-
-          // Push to Supabase trips under Uber Platform WITHOUT duty_session_id
-          supabase.from('trips').upsert({
-            id: uu.id,
-            driver_id: uu.driver_id,
-            company_id: uberCompId,
-            vehicle_id: uu.vehicle_id || null,
-            trip_date: uu.earnings_date || getTodayDateIST(),
-            trip_time: getCurrentTimeIST(),
-            created_at: new Date().toISOString(),
-            entered_km: uu.rides_count && uu.rides_count > 0 ? uu.rides_count : 1,
-            trip_type: 'ONE_SIDE',
-            km_multiplier: 1,
-            total_km: uu.amount,
-            notes: encodedNotes,
-          }).then(({ error }) => {
-            if (error) console.warn('Sync auto-upload to trips warning:', error.message);
-          });
-
-          // Also try upserting to uber_earnings table
-          supabase.from('uber_earnings').upsert({
-            id: uu.id,
-            driver_id: uu.driver_id,
-            vehicle_id: uu.vehicle_id || null,
-            amount: uu.amount,
-            rides_count: uu.rides_count || null,
-            earnings_date: uu.earnings_date || getTodayDateIST(),
-            notes: encodedNotes,
-          }).then(() => null, () => null);
-
-          cloudUberMap.set(uu.id, { ...uu, category: uberCategory });
-        }
-      }
-
+      // Save authoritative list without re-inserting deleted items
       const mergedUber = Array.from(cloudUberMap.values());
       setItem(STORAGE_KEYS.UBER_EARNINGS, mergedUber);
-
-      // Also ensure all trips stored locally include the latest merged Uber entries
-      const currentTrips = this.getTrips();
-      const currentTripIds = new Set(currentTrips.map((t) => t.id));
-      let tripsUpdated = false;
-      for (const uu of mergedUber) {
-        if (!currentTripIds.has(uu.id)) {
-          currentTrips.unshift({
-            id: uu.id,
-            driver_id: uu.driver_id,
-            company_id: uberCompId,
-            vehicle_id: uu.vehicle_id,
-            duty_session_id: uu.duty_session_id,
-            one_side_km: uu.rides_count || 1,
-            trip_type: 'ONE_SIDE',
-            multiplier: 1,
-            total_km: uu.amount,
-            trip_date: uu.earnings_date,
-            notes: `[UBER_EARNINGS:${JSON.stringify({
-              amount: uu.amount,
-              rides: uu.rides_count || 1,
-              category: uu.category || 'UBER_EARNINGS',
-              notes: uu.notes || (uu.category === 'UBER_RENT' ? 'Uber Rent' : 'Uber Earnings'),
-            })}]`,
-            created_at: uu.created_at,
-          });
-          currentTripIds.add(uu.id);
-          tripsUpdated = true;
-        }
-      }
-      if (tripsUpdated) {
-        setItem(STORAGE_KEYS.TRIPS, currentTrips);
-      }
 
       setItem(STORAGE_KEYS.INITIALIZED, 'true');
     } catch (err) {
@@ -1752,7 +1692,9 @@ export class FleetStore {
   }
 
   static async deleteTripAsync(tripId: string): Promise<boolean> {
-    const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : tripId;
+    const cleanId = tripId.startsWith('uber-') ? tripId.replace('uber-', '') : (tripId.startsWith('fuel-') ? tripId.replace('fuel-', '') : tripId);
+    markEntityDeleted(cleanId);
+    markEntityDeleted(tripId);
     const trips = this.getTrips().filter((t) => t.id !== cleanId && t.id !== tripId);
     setItem(STORAGE_KEYS.TRIPS, trips);
 
@@ -1788,29 +1730,32 @@ export class FleetStore {
       const supabase = createClient();
       const { data, error } = await supabase.from('fuel_expenses').select('*').order('created_at', { ascending: false });
       if (!error && Array.isArray(data)) {
-        const cloudFuel: FuelLog[] = data.map((row: any) => {
-          let liters = row.liters_or_kg || row.quantity;
-          let cleanNotes = row.notes;
-          if (!liters && row.notes) {
-            const lMatch = String(row.notes).match(/^([\d.]+)\s*(?:L|Kg|L\/Kg)\s*(?:\|\s*(.*))?$/i);
-            if (lMatch) {
-              liters = parseFloat(lMatch[1]);
-              cleanNotes = lMatch[2] || undefined;
+        const deletedIds = getDeletedEntityIds();
+        const cloudFuel: FuelLog[] = data
+          .filter((row: any) => !deletedIds.has(row.id))
+          .map((row: any) => {
+            let liters = row.liters_or_kg || row.quantity;
+            let cleanNotes = row.notes;
+            if (!liters && row.notes) {
+              const lMatch = String(row.notes).match(/^([\d.]+)\s*(?:L|Kg|L\/Kg)\s*(?:\|\s*(.*))?$/i);
+              if (lMatch) {
+                liters = parseFloat(lMatch[1]);
+                cleanNotes = lMatch[2] || undefined;
+              }
             }
-          }
-          return {
-            id: row.id,
-            driver_id: row.driver_id,
-            vehicle_id: row.vehicle_id,
-            duty_session_id: row.duty_session_id,
-            fuel_type: row.fuel_type || 'CNG',
-            amount: Number(row.amount || 0),
-            liters_or_kg: liters || null,
-            log_date: row.expense_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
-            notes: cleanNotes,
-            created_at: row.created_at || new Date().toISOString(),
-          };
-        });
+            return {
+              id: row.id,
+              driver_id: row.driver_id,
+              vehicle_id: row.vehicle_id,
+              duty_session_id: row.duty_session_id,
+              fuel_type: row.fuel_type || 'CNG',
+              amount: Number(row.amount || 0),
+              liters_or_kg: liters || null,
+              log_date: row.expense_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+              notes: cleanNotes,
+              created_at: row.created_at || new Date().toISOString(),
+            };
+          });
         setItem(STORAGE_KEYS.FUEL_LOGS, cloudFuel);
         return cloudFuel;
       }
@@ -1894,13 +1839,21 @@ export class FleetStore {
   }
 
   static async deleteFuelLogAsync(id: string): Promise<boolean> {
-    const fuelLogs = this.getFuelLogs().filter((f) => f.id !== id);
+    const cleanId = id.startsWith('fuel-') ? id.replace('fuel-', '') : id;
+    markEntityDeleted(cleanId);
+    markEntityDeleted(id);
+    const fuelLogs = this.getFuelLogs().filter((f) => f.id !== cleanId && f.id !== id);
     setItem(STORAGE_KEYS.FUEL_LOGS, fuelLogs);
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        await supabase.from('fuel_expenses').delete().eq('id', id);
+        if (cleanId.includes('_')) {
+          const [drvId, expDate] = cleanId.split('_');
+          await supabase.from('fuel_expenses').delete().eq('driver_id', drvId).eq('expense_date', expDate);
+        } else {
+          await supabase.from('fuel_expenses').delete().eq('id', cleanId);
+        }
         return true;
       } catch (err) {
         console.error('Supabase deleteFuelLogAsync error:', err);
@@ -1930,23 +1883,25 @@ export class FleetStore {
 
       const uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
       const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+      const deletedIds = getDeletedEntityIds();
 
       const cloudMap = new Map<string, UberEarning>();
 
-      // 1. From trips table
+      // 1. From trips table (authoritative)
       if (Array.isArray(tRes.data)) {
         for (const t of tRes.data) {
+          if (deletedIds.has(t.id)) continue;
           if (t.company_id === uberCompId || (t.notes && String(t.notes).includes('[UBER_EARNINGS:'))) {
             const parsed = parseUberTrip(t);
-            if (parsed) cloudMap.set(parsed.id, parsed);
+            if (parsed && !deletedIds.has(parsed.id)) cloudMap.set(parsed.id, parsed);
           }
         }
       }
 
-      // 2. From uber_earnings table
+      // 2. From uber_earnings table if present
       if (uRes && Array.isArray(uRes.data)) {
         for (const row of uRes.data) {
-          if (!row || !row.id) continue;
+          if (!row || !row.id || deletedIds.has(row.id)) continue;
           cloudMap.set(row.id, {
             id: row.id,
             driver_id: row.driver_id,
@@ -1961,14 +1916,7 @@ export class FleetStore {
         }
       }
 
-      // 3. Merge with local storage
-      const localUber = this.getUberEarnings();
-      for (const u of localUber) {
-        if (!cloudMap.has(u.id)) {
-          cloudMap.set(u.id, u);
-        }
-      }
-
+      // Cloud data is authoritative: save directly to storage without re-inserting deleted items
       const merged = Array.from(cloudMap.values()).sort((a, b) => (b.earnings_date > a.earnings_date ? 1 : -1));
       setItem(STORAGE_KEYS.UBER_EARNINGS, merged);
       return merged;
@@ -2200,6 +2148,8 @@ export class FleetStore {
 
   static async deleteUberEarningAsync(id: string): Promise<void> {
     const cleanId = id.startsWith('uber-') ? id.replace('uber-', '') : id;
+    markEntityDeleted(cleanId);
+    markEntityDeleted(id);
     const all = this.getUberEarnings().filter((u) => u.id !== cleanId && u.id !== id);
     setItem(STORAGE_KEYS.UBER_EARNINGS, all);
 
@@ -2222,6 +2172,7 @@ export class FleetStore {
   // Today's Driver Summary (Cloud-First)
   static async fetchDriverTodaySummaryAsync(driverId: string): Promise<DriverTodaySummary> {
     const today = getTodayDateIST();
+    const deletedIds = getDeletedEntityIds();
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
@@ -2234,7 +2185,8 @@ export class FleetStore {
           supabase.from('companies').select('*'),
         ]);
 
-        const sessions = Array.isArray(dRes.data) ? dRes.data : [];
+        const rawSessions = Array.isArray(dRes.data) ? dRes.data : [];
+        const sessions = rawSessions.filter((s: any) => !deletedIds.has(s.id));
         const activeSession = sessions.find((s: any) => !s.end_time);
         const todaySessions = sessions.filter((s: any) => s.session_date === today || (s.start_time && String(s.start_time).startsWith(today)));
         const primarySession = activeSession || todaySessions[0] || null;
@@ -2243,15 +2195,17 @@ export class FleetStore {
         const endTime = primarySession?.end_time || null;
         const working = calculateWorkingHours(startTime, endTime);
 
-        const trips = Array.isArray(tRes.data) ? tRes.data : [];
+        const rawTrips = Array.isArray(tRes.data) ? tRes.data : [];
+        const trips = rawTrips.filter((t: any) => !deletedIds.has(t.id));
         const totalTrips = trips.length;
         const totalKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
 
-        const fuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const rawFuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const fuel = rawFuel.filter((f: any) => !deletedIds.has(f.id));
         const fuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
         const fuelCostPerKm = totalKm > 0 ? parseFloat((fuelExpense / totalKm).toFixed(2)) : 0;
 
-        // Uber Earnings & Uber Rent Today (From trips + uber_earnings table + local storage)
+        // Uber Earnings & Uber Rent Today (From trips + uber_earnings table)
         const uberComp = (cRes.data || []).find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
         const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
 
@@ -2280,7 +2234,7 @@ export class FleetStore {
         // 2. From uber_earnings table
         if (uRes && Array.isArray(uRes.data)) {
           for (const u of uRes.data) {
-            if (!seenTodayUber.has(u.id)) {
+            if (!deletedIds.has(u.id) && !seenTodayUber.has(u.id)) {
               seenTodayUber.add(u.id);
               const amt = Number(u.amount || 0);
               const isRent = (u.notes && String(u.notes).toLowerCase().includes('rent')) || u.category === 'UBER_RENT';
@@ -2289,20 +2243,6 @@ export class FleetStore {
               } else {
                 uberEarningsToday += amt;
               }
-            }
-          }
-        }
-
-        // 3. From local storage
-        const localUberToday = this.getUberEarnings().filter((u) => u.driver_id === driverId && u.earnings_date === today);
-        for (const u of localUberToday) {
-          if (!seenTodayUber.has(u.id)) {
-            seenTodayUber.add(u.id);
-            const amt = Number(u.amount || 0);
-            if (u.category === 'UBER_RENT') {
-              uberRentToday += amt;
-            } else {
-              uberEarningsToday += amt;
             }
           }
         }
@@ -2458,14 +2398,18 @@ export class FleetStore {
         const totalDrivers = drivers.length;
         const activeDrivers = drivers.filter((d: any) => (d.status ? d.status === 'ACTIVE' : d.is_active !== false)).length;
 
-        const duty = Array.isArray(dRes.data) ? dRes.data : [];
+        const deletedIds = getDeletedEntityIds();
+        const rawDuty = Array.isArray(dRes.data) ? dRes.data : [];
+        const duty = rawDuty.filter((s: any) => !deletedIds.has(s.id));
         const onDutyDrivers = duty.filter((s: any) => !s.end_time).length;
 
-        const trips = Array.isArray(tRes.data) ? tRes.data : [];
+        const rawTrips = Array.isArray(tRes.data) ? tRes.data : [];
+        const trips = rawTrips.filter((t: any) => !deletedIds.has(t.id));
         const todayTrips = trips.length;
         const todayKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
 
-        const fuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const rawFuel = Array.isArray(fRes.data) ? fRes.data : [];
+        const fuel = rawFuel.filter((f: any) => !deletedIds.has(f.id));
         const todayFuelExpense = fuel.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
         const todayFuelCostPerKm = todayKm > 0 ? parseFloat((todayFuelExpense / todayKm).toFixed(2)) : 0;
 
@@ -2497,7 +2441,7 @@ export class FleetStore {
         // 2. From uber_earnings table
         if (uRes && Array.isArray(uRes.data)) {
           for (const u of uRes.data) {
-            if (!seenTodayUber.has(u.id)) {
+            if (!deletedIds.has(u.id) && !seenTodayUber.has(u.id)) {
               seenTodayUber.add(u.id);
               const amt = Number(u.amount || 0);
               const isRent = (u.notes && String(u.notes).toLowerCase().includes('rent')) || u.category === 'UBER_RENT';
@@ -2506,20 +2450,6 @@ export class FleetStore {
               } else {
                 todayUberEarnings += amt;
               }
-            }
-          }
-        }
-
-        // 3. From local storage
-        const localUberToday = this.getUberEarnings().filter((u) => u.earnings_date === today);
-        for (const u of localUberToday) {
-          if (!seenTodayUber.has(u.id)) {
-            seenTodayUber.add(u.id);
-            const amt = Number(u.amount || 0);
-            if (u.category === 'UBER_RENT') {
-              todayUberRent += amt;
-            } else {
-              todayUberEarnings += amt;
             }
           }
         }
@@ -2648,8 +2578,11 @@ export class FleetStore {
         const uberComp = companies.find((c: any) => (c.company_name || c.name || '').toLowerCase().includes('uber'));
         const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
 
+        const deletedIds = getDeletedEntityIds();
+
         // Filter trips
         const filteredTrips = trips.filter((t: any) => {
+          if (deletedIds.has(t.id)) return false;
           if (filters.startDate && t.trip_date < filters.startDate) return false;
           if (filters.endDate && t.trip_date > filters.endDate) return false;
           if (filters.driverId !== 'ALL' && t.driver_id !== filters.driverId) return false;
@@ -2708,7 +2641,7 @@ export class FleetStore {
             let fuelOnDate = 0;
             if (!assignedFuelDates.has(dateKey)) {
               fuelOnDate = fuelLogs
-                .filter((f: any) => f.driver_id === t.driver_id && (f.expense_date === t.trip_date || f.log_date === t.trip_date))
+                .filter((f: any) => !deletedIds.has(f.id) && f.driver_id === t.driver_id && (f.expense_date === t.trip_date || f.log_date === t.trip_date))
                 .reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
               assignedFuelDates.add(dateKey);
             }
@@ -2753,6 +2686,7 @@ export class FleetStore {
         // Also include standalone fuel expenses where driver had no trips on that day
         if (filters.companyId === 'ALL') {
           const filteredFuel = fuelLogs.filter((f: any) => {
+            if (deletedIds.has(f.id)) return false;
             const fDate = f.expense_date || f.log_date;
             if (filters.startDate && fDate < filters.startDate) return false;
             if (filters.endDate && fDate > filters.endDate) return false;
@@ -2761,7 +2695,7 @@ export class FleetStore {
             return !assignedFuelDates.has(dateKey);
           });
 
-          const standaloneMap = new Map<string, { driver_id: string; log_date: string; amount: number; notes?: string; vehicle_id?: string }>();
+          const standaloneMap = new Map<string, { id: string; driver_id: string; log_date: string; amount: number; notes?: string; vehicle_id?: string }>();
           for (const f of filteredFuel) {
             const fDate = f.expense_date || f.log_date;
             const key = `${f.driver_id}_${fDate}`;
@@ -2770,6 +2704,7 @@ export class FleetStore {
               existing.amount += Number(f.amount || 0);
             } else {
               standaloneMap.set(key, {
+                id: f.id,
                 driver_id: f.driver_id,
                 log_date: fDate,
                 amount: Number(f.amount || 0),
@@ -2783,7 +2718,7 @@ export class FleetStore {
             const driver = driverMap.get(entry.driver_id);
             const vehicle = entry.vehicle_id ? vehicleMap.get(entry.vehicle_id) : undefined;
             items.push({
-              id: `fuel-${key}`,
+              id: `fuel-${entry.id || key}`,
               trip_date: entry.log_date,
               driver_name: driver?.name || driver?.full_name || 'Driver',
               driver_phone: driver?.phone,
@@ -2804,14 +2739,13 @@ export class FleetStore {
           });
         }
 
-        // Include any standalone Uber Platform earnings from uber_earnings table or local storage that were not already in trips
+        // Include any standalone Uber Platform earnings from uber_earnings table that were not already in trips
         if (filters.companyId === 'ALL' || filters.companyId === 'UBER' || filters.companyId === uberCompId) {
           const cloudUber = Array.isArray(uRes.data) ? uRes.data : [];
-          const localUber = this.getUberEarnings();
           const allUberMap = new Map<string, any>();
 
-          for (const u of [...cloudUber, ...localUber]) {
-            if (u && u.id && !seenUberIds.has(u.id)) {
+          for (const u of cloudUber) {
+            if (u && u.id && !seenUberIds.has(u.id) && !deletedIds.has(u.id)) {
               allUberMap.set(u.id, u);
             }
           }

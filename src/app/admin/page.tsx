@@ -217,9 +217,20 @@ export default function AdminDashboard() {
       (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
       companyMap.get(trip.company_id)?.name?.toLowerCase().includes('uber')
     );
+    let uberAmount = 0;
+    if (isUber && trip.notes) {
+      const match = trip.notes.match(/\[UBER_EARNINGS:(.*?)\]/);
+      if (match && match[1]) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          if (parsed.amount) uberAmount = Number(parsed.amount);
+        } catch {}
+      }
+    }
     const label = isUber ? 'Uber Platform Entry' : 'Trip Entry';
+    const detail = isUber ? (uberAmount > 0 ? `₹${uberAmount}` : 'Payout') : `${trip.total_km} KM`;
     const confirmDelete = window.confirm(
-      `Are you sure you want to permanently delete this ${label} for ${driver?.full_name || 'Driver'} (${trip.total_km} KM)?\n\nThis will remove it directly from the database and recalculate fleet statistics.`
+      `Are you sure you want to permanently delete this ${label} for ${driver?.full_name || 'Driver'} (${detail})?\n\nThis will remove it directly from the database and recalculate fleet statistics.`
     );
     if (!confirmDelete) return;
 

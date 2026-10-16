@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/Badge';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { EditTripModal } from '@/components/admin/EditTripModal';
 import { deleteTripAction } from '@/actions/trips';
+import { deleteFuelLogAction } from '@/actions/fuel';
 import {
   FileSpreadsheet,
   Download,
@@ -138,20 +139,37 @@ export default function AdminReportsPage() {
   }, [filterCriteria]);
 
   const handleOpenEditEntry = (item: DetailedReportItem) => {
+    if (item.company_name.includes('Fuel') || item.id.startsWith('fuel-')) {
+      alert('Fuel expenses can be deleted here or logged from the Driver dashboard.');
+      return;
+    }
     setEditingItem(item);
     setIsEditModalOpen(true);
   };
 
   const handleDeleteEntry = async (item: DetailedReportItem) => {
-    const isUber = item.company_name === 'Uber Platform' || item.id.startsWith('uber-');
-    const label = isUber ? 'Uber Payout Entry' : 'Trip Entry';
-    if (confirm(`Are you sure you want to delete this ${label} for ${item.driver_name} (${item.total_km > 0 ? `${item.total_km} km` : `₹${item.earnings}`})?\n\nThis will remove it from the database and recalculate report statistics.`)) {
-      const cleanId = item.id.startsWith('uber-') ? item.id.replace('uber-', '') : item.id;
-      await Promise.all([
-        FleetStore.deleteTripAsync(cleanId),
-        FleetStore.deleteUberEarningAsync(cleanId),
-        deleteTripAction(cleanId),
-      ]);
+    const isFuel = item.company_name.includes('Fuel') || item.id.startsWith('fuel-');
+    const isUber = item.company_name === 'Uber Platform' || item.company_name === 'Uber Rent' || item.id.startsWith('uber-');
+    const label = isFuel ? 'Fuel Expense Entry' : (isUber ? 'Uber Platform Entry' : 'Trip Entry');
+    const amountOrKm = isFuel
+      ? `₹${item.fuel_amount}`
+      : (item.total_km > 0 ? `${item.total_km} km` : `₹${item.earnings}`);
+
+    if (confirm(`Are you sure you want to delete this ${label} for ${item.driver_name} (${amountOrKm})?\n\nThis will remove it from the database and recalculate report statistics.`)) {
+      if (isFuel) {
+        const cleanFuelId = item.id.startsWith('fuel-') ? item.id.replace('fuel-', '') : item.id;
+        await Promise.all([
+          FleetStore.deleteFuelLogAsync(cleanFuelId),
+          deleteFuelLogAction(cleanFuelId),
+        ]);
+      } else {
+        const cleanId = item.id.startsWith('uber-') ? item.id.replace('uber-', '') : item.id;
+        await Promise.all([
+          FleetStore.deleteTripAsync(cleanId),
+          FleetStore.deleteUberEarningAsync(cleanId),
+          deleteTripAction(cleanId),
+        ]);
+      }
       refreshReportData();
     }
   };
