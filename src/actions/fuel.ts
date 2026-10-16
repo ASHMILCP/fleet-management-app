@@ -43,6 +43,7 @@ export async function createFuelLogAction(params: {
         fuel_type: params.fuelType || 'CNG',
         amount: params.amount,
         expense_date: params.logDate || getTodayDateIST(),
+        created_at: new Date().toISOString(),
         notes: cleanNotes,
       })
       .select()

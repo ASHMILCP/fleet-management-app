@@ -65,6 +65,7 @@ export interface Trip {
   multiplier: 1 | 2;
   total_km: number;
   trip_date: string; // YYYY-MM-DD
+  trip_time?: string; // HH:MM:SS or HH:MM AM/PM
   notes?: string;
   created_at: string;
   // joined fields
@@ -82,6 +83,7 @@ export interface FuelLog {
   amount: number;
   liters_or_kg?: number | null;
   log_date: string; // YYYY-MM-DD
+  log_time?: string; // HH:MM:SS or HH:MM
   notes?: string;
   created_at: string;
   // joined fields

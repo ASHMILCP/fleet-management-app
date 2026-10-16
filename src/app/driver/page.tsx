@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
 import { Profile, Trip, FuelLog, UberEarning, DriverTodaySummary, Company } from '@/types';
-import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
+import { getTodayDateIST, formatTimeIST, formatTripTime, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
 import { AddTripDialog } from '@/components/driver/AddTripDialog';
 import { EditTripDialog } from '@/components/driver/EditTripDialog';
@@ -391,7 +391,7 @@ export default function DriverDashboard() {
                             {companyName}
                           </div>
                           <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                            <span>Logged at {formatTimeIST(trip.created_at)}</span>
+                            <span>Logged at {formatTripTime(trip)}</span>
                             {trip.notes && (
                               <>
                                 <span>&bull;</span>

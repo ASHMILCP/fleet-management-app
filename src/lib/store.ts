@@ -27,7 +27,7 @@ import {
   INITIAL_UBER_EARNINGS,
   INITIAL_ADMIN,
 } from './mockData';
-import { getTodayDateIST, calculateWorkingHours, formatTimeIST } from './timezone';
+import { getTodayDateIST, getCurrentTime24IST, getCurrentTimeIST, calculateWorkingHours, formatTimeIST, formatTripTime } from './timezone';
 import { createClient, isLiveSupabaseConfigured } from './supabase/client';
 
 const STORAGE_KEYS = {
@@ -477,6 +477,7 @@ export class FleetStore {
           multiplier: (Number(row.km_multiplier) === 1 || row.trip_type === 'TWO_SIDE' ? 1 : 2) as (1 | 2),
           total_km: Number(row.total_km || 0),
           trip_date: row.trip_date || (row.created_at ? row.created_at.split('T')[0] : getTodayDateIST()),
+          trip_time: row.trip_time || undefined,
           notes: row.notes,
           created_at: row.created_at || new Date().toISOString(),
         }));
@@ -573,7 +574,8 @@ export class FleetStore {
             company_id: uberCompId,
             vehicle_id: uu.vehicle_id || null,
             trip_date: uu.earnings_date || getTodayDateIST(),
-            trip_time: '20:00:00',
+            trip_time: getCurrentTimeIST(),
+            created_at: new Date().toISOString(),
             entered_km: uu.rides_count && uu.rides_count > 0 ? uu.rides_count : 1,
             trip_type: 'ONE_SIDE',
             km_multiplier: 1,
@@ -1509,14 +1511,17 @@ export class FleetStore {
     return this.getTrips();
   }
 
-  static async addTripAsync(trip: Omit<Trip, 'id' | 'created_at'>): Promise<Trip> {
+  static async addTripAsync(trip: Omit<Trip, 'id' | 'created_at'> & { created_at?: string }): Promise<Trip> {
     const newId = generateUUID();
     const today = trip.trip_date || getTodayDateIST();
+    const currentTime24 = trip.trip_time || getCurrentTime24IST();
+    const nowIso = new Date().toISOString();
     const newTrip: Trip = {
       ...trip,
       id: newId,
       trip_date: today,
-      created_at: new Date().toISOString(),
+      trip_time: currentTime24,
+      created_at: trip.created_at || nowIso,
     };
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
@@ -1546,6 +1551,8 @@ export class FleetStore {
         km_multiplier: newTrip.multiplier || (newTrip.trip_type === 'TWO_SIDE' ? 1 : 2),
         total_km: newTrip.total_km,
         trip_date: today,
+        trip_time: currentTime24,
+        created_at: nowIso,
         notes: newTrip.notes || null,
       }).select().single();
 
@@ -1556,6 +1563,7 @@ export class FleetStore {
 
       if (data) {
         newTrip.id = data.id;
+        newTrip.trip_time = data.trip_time || newTrip.trip_time;
         newTrip.created_at = data.created_at || newTrip.created_at;
       }
     }
@@ -1567,12 +1575,13 @@ export class FleetStore {
     return newTrip;
   }
 
-  static addTrip(trip: Omit<Trip, 'id' | 'created_at'>): Trip {
+  static addTrip(trip: Omit<Trip, 'id' | 'created_at'> & { created_at?: string }): Trip {
     this.addTripAsync(trip).catch((err) => console.error('addTrip fallback error:', err));
     const trips = this.getTrips();
     const newTrip: Trip = {
       ...trip,
       id: generateUUID(),
+      trip_time: trip.trip_time || getCurrentTime24IST(),
       created_at: new Date().toISOString(),
     };
     trips.unshift(newTrip);
@@ -1591,6 +1600,7 @@ export class FleetStore {
       multiplier?: 1 | 2;
       total_km?: number;
       trip_date?: string;
+      trip_time?: string;
       notes?: string;
     }
   ): Promise<Trip | null> {
@@ -1678,6 +1688,7 @@ export class FleetStore {
         }
         if (totalKm !== undefined) payload.total_km = totalKm;
         if (updates.trip_date) payload.trip_date = updates.trip_date;
+        if (updates.trip_time) payload.trip_time = updates.trip_time;
         if (updates.notes !== undefined) payload.notes = cleanNotes;
 
         let { error } = await supabase.from('trips').update(payload).eq('id', cleanId);
@@ -1809,14 +1820,14 @@ export class FleetStore {
     return this.getFuelLogs();
   }
 
-  static async addFuelLogAsync(fuel: Omit<FuelLog, 'id' | 'created_at'>): Promise<FuelLog> {
+  static async addFuelLogAsync(fuel: Omit<FuelLog, 'id' | 'created_at'> & { created_at?: string }): Promise<FuelLog> {
     const newId = generateUUID();
     const today = fuel.log_date || getTodayDateIST();
     const newFuel: FuelLog = {
       ...fuel,
       id: newId,
       log_date: today,
-      created_at: new Date().toISOString(),
+      created_at: fuel.created_at || new Date().toISOString(),
     };
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
@@ -1847,6 +1858,7 @@ export class FleetStore {
         fuel_type: newFuel.fuel_type || 'CNG',
         amount: newFuel.amount,
         expense_date: today,
+        created_at: newFuel.created_at,
         notes: cleanNotes,
       }).select().single();
 
@@ -1868,13 +1880,13 @@ export class FleetStore {
     return newFuel;
   }
 
-  static addFuelLog(fuel: Omit<FuelLog, 'id' | 'created_at'>): FuelLog {
+  static addFuelLog(fuel: Omit<FuelLog, 'id' | 'created_at'> & { created_at?: string }): FuelLog {
     this.addFuelLogAsync(fuel).catch((err) => console.error('addFuelLog fallback error:', err));
     const fuelLogs = this.getFuelLogs();
     const newFuel: FuelLog = {
       ...fuel,
       id: generateUUID(),
-      created_at: new Date().toISOString(),
+      created_at: fuel.created_at || new Date().toISOString(),
     };
     fuelLogs.unshift(newFuel);
     setItem(STORAGE_KEYS.FUEL_LOGS, fuelLogs);
@@ -2029,7 +2041,8 @@ export class FleetStore {
           company_id: uberCompanyId,
           vehicle_id: newUber.vehicle_id || null,
           trip_date: today,
-          trip_time: formatTimeIST(new Date()),
+          trip_time: getCurrentTimeIST(),
+          created_at: new Date().toISOString(),
           entered_km: newUber.rides_count && newUber.rides_count > 0 ? newUber.rides_count : 1,
           trip_type: 'ONE_SIDE',
           km_multiplier: 1,

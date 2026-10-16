@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { TripType } from '@/types';
-import { getTodayDateIST } from '@/lib/timezone';
+import { getTodayDateIST, getCurrentTime24IST } from '@/lib/timezone';
 import { revalidatePath } from 'next/cache';
 
 export async function createTripAction(params: {
@@ -12,6 +12,8 @@ export async function createTripAction(params: {
   dutySessionId?: string;
   oneSideKm: number;
   tripType: TripType;
+  tripDate?: string;
+  tripTime?: string;
   notes?: string;
 }) {
   try {
@@ -45,7 +47,9 @@ export async function createTripAction(params: {
       trip_type: params.tripType,
       km_multiplier: multiplier,
       total_km: totalKm,
-      trip_date: getTodayDateIST(),
+      trip_date: params.tripDate || getTodayDateIST(),
+      trip_time: params.tripTime || getCurrentTime24IST(),
+      created_at: new Date().toISOString(),
       notes: cleanNotes,
     };
 
@@ -91,6 +95,7 @@ export async function updateTripAction(params: {
   multiplier?: 1 | 2;
   totalKm?: number;
   tripDate?: string;
+  tripTime?: string;
   notes?: string;
 }) {
   try {
@@ -130,6 +135,9 @@ export async function updateTripAction(params: {
       trip_date: tripDate,
       notes: cleanNotes,
     };
+    if (params.tripTime) {
+      payload.trip_time = params.tripTime;
+    }
 
     let { data, error } = await supabase
       .from('trips')

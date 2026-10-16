@@ -3,10 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { Company, TripType } from '@/types';
 import { FleetStore } from '@/lib/store';
-import { getTodayDateIST } from '@/lib/timezone';
+import { getTodayDateIST, getCurrentTime24IST, formatTimeIST } from '@/lib/timezone';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Navigation, Plus, Calculator, CheckCircle, ArrowRight } from 'lucide-react';
+import { Navigation, Plus, Calculator, CheckCircle, ArrowRight, Calendar, Clock } from 'lucide-react';
 
 interface AddTripDialogProps {
   driverId: string;
@@ -25,6 +25,8 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [oneSideKm, setOneSideKm] = useState<string>('');
   const [tripType, setTripType] = useState<TripType>('ONE_SIDE');
+  const [tripDate, setTripDate] = useState<string>(getTodayDateIST());
+  const [tripTime, setTripTime] = useState<string>(getCurrentTime24IST());
   const [notes, setNotes] = useState<string>('');
 
   // Confirmation modal step
@@ -33,6 +35,8 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setTripDate(getTodayDateIST());
+      setTripTime(getCurrentTime24IST());
       const initialActive = FleetStore.getActiveCompanies();
       setCompanies(initialActive);
       if (initialActive.length > 0 && !selectedCompanyId) {
@@ -72,6 +76,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
       const driver = FleetStore.getCurrentUser();
       const driverFromList = FleetStore.getDrivers().find((d) => d.id === driverId);
       const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || driverFromList?.assigned_vehicle_id || undefined;
+      const formattedTime = tripTime ? (tripTime.length === 5 ? `${tripTime}:00` : tripTime) : getCurrentTime24IST();
 
       await FleetStore.addTripAsync({
         driver_id: driverId,
@@ -82,7 +87,8 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
         trip_type: tripType,
         multiplier,
         total_km: calculatedTotalKm,
-        trip_date: getTodayDateIST(),
+        trip_date: tripDate || getTodayDateIST(),
+        trip_time: formattedTime,
         notes: notes.trim() || undefined,
       });
 
@@ -133,6 +139,36 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
                 ))
               )}
             </select>
+          </div>
+
+          {/* TRIP DATE & TIME (IST) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                <span>Trip Date</span>
+              </label>
+              <input
+                type="date"
+                value={tripDate}
+                onChange={(e) => setTripDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-blue-600" />
+                <span>Trip Time (IST)</span>
+              </label>
+              <input
+                type="time"
+                value={tripTime}
+                onChange={(e) => setTripTime(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                required
+              />
+            </div>
           </div>
 
           <div>
@@ -245,6 +281,13 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
                 <span className="font-bold text-slate-800">{selectedCompany?.name}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-500">Trip Timing (IST):</span>
+                <span className="font-mono font-semibold text-slate-800 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{formatTimeIST(tripTime)} ({tripDate})</span>
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-500">One-Side Distance:</span>
                 <span className="font-mono font-semibold text-slate-800">{parsedKm} KM</span>
               </div>
@@ -270,7 +313,7 @@ export const AddTripDialog: React.FC<AddTripDialogProps> = ({
           </div>
 
           <p className="text-xs text-slate-500 text-center">
-            This will record the trip for today ({getTodayDateIST()}) under your current shift.
+            This will record the trip for {tripDate} at {formatTimeIST(tripTime)} (IST) under your current shift.
           </p>
 
           <div className="flex items-center justify-end gap-3 pt-2">

@@ -1,12 +1,10 @@
-'use client';
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FuelType } from '@/types';
 import { FleetStore } from '@/lib/store';
-import { getTodayDateIST } from '@/lib/timezone';
+import { getTodayDateIST, getCurrentTime24IST, formatTimeIST } from '@/lib/timezone';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Fuel, IndianRupee, Calendar, CheckCircle } from 'lucide-react';
+import { Fuel, IndianRupee, Calendar, Clock, CheckCircle } from 'lucide-react';
 
 interface AddFuelDialogProps {
   driverId: string;
@@ -25,8 +23,16 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
   const [amount, setAmount] = useState<string>('');
   const [litersOrKg, setLitersOrKg] = useState<string>('');
   const [date, setDate] = useState<string>(getTodayDateIST());
+  const [time, setTime] = useState<string>(getCurrentTime24IST());
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setDate(getTodayDateIST());
+      setTime(getCurrentTime24IST());
+    }
+  }, [isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +49,10 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
       const driverFromList = FleetStore.getDrivers().find((d) => d.id === driverId);
       const vehicleId = activeDuty?.vehicle_id || driver?.assigned_vehicle_id || driverFromList?.assigned_vehicle_id || undefined;
 
+      const safeTime = time ? (time.length === 5 ? `${time}:00` : time) : getCurrentTime24IST();
+      const safeDate = date || getTodayDateIST();
+      const customCreatedAt = new Date(`${safeDate}T${safeTime}+05:30`).toISOString();
+
       await FleetStore.addFuelLogAsync({
         driver_id: driverId,
         vehicle_id: vehicleId,
@@ -50,7 +60,9 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
         fuel_type: fuelType,
         amount: parsedAmount,
         liters_or_kg: litersOrKg ? parseFloat(litersOrKg) : null,
-        log_date: date || getTodayDateIST(),
+        log_date: safeDate,
+        log_time: safeTime,
+        created_at: customCreatedAt,
         notes: notes.trim() || undefined,
       });
 
@@ -131,37 +143,49 @@ export const AddFuelDialog: React.FC<AddFuelDialogProps> = ({
           </div>
         </div>
 
-        {/* DATE & QUANTITY ROW */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* DATE & TIME ROW (IST) */}
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider">
-              Date (Asia/Kolkata)
-            </label>
-            <div className="relative">
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider">
-              Quantity ({fuelType === 'CNG' ? 'Kg' : 'Liters'}) (Optional)
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-amber-600" />
+              <span>Fuel Date</span>
             </label>
             <input
-              type="number"
-              step="0.01"
-              min="0.1"
-              value={litersOrKg}
-              onChange={(e) => setLitersOrKg(e.target.value)}
-              placeholder={fuelType === 'CNG' ? 'e.g. 8.5 kg' : 'e.g. 7.2 L'}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              required
             />
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-600" />
+              <span>Fuel Time (IST)</span>
+            </label>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              required
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5 uppercase tracking-wider">
+            Quantity ({fuelType === 'CNG' ? 'Kg' : 'Liters'}) (Optional)
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            min="0.1"
+            value={litersOrKg}
+            onChange={(e) => setLitersOrKg(e.target.value)}
+            placeholder={fuelType === 'CNG' ? 'e.g. 8.5 kg' : 'e.g. 7.2 L'}
+            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
         </div>
 
         <div>

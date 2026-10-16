@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { FleetStore } from '@/lib/store';
 import { AdminSummaryMetrics, DutySession, Profile, Vehicle, Company, Trip, DetailedReportItem } from '@/types';
-import { formatTimeIST, formatCurrencyINR, getTodayDateIST } from '@/lib/timezone';
+import { formatTimeIST, formatTripTime, formatCurrencyINR, getTodayDateIST } from '@/lib/timezone';
 import { deleteTripAction } from '@/actions/trips';
 import { StatCard } from '@/components/admin/StatCard';
 import { Card } from '@/components/ui/Card';
@@ -785,7 +785,7 @@ export default function AdminDashboard() {
                             {trip.trip_date}
                           </div>
                           <div className="text-[11px] font-mono text-slate-400">
-                            {formatTimeIST(trip.created_at)}
+                            {formatTripTime(trip)}
                           </div>
                         </td>
 

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
 import { Trip, Profile } from '@/types';
-import { formatDateIST, formatTimeIST } from '@/lib/timezone';
+import { formatDateIST, formatTimeIST, formatTripTime } from '@/lib/timezone';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -59,7 +59,7 @@ export default function DriverHistoryPage() {
     const headers = ['Date', 'Time', 'Company', 'Trip Type', 'One-Side KM', 'Multiplier', 'Total KM', 'Notes'];
     const rows = trips.map((t) => [
       t.trip_date,
-      formatTimeIST(t.created_at),
+      formatTripTime(t),
       `"${companyMap.get(t.company_id) || 'Corporate Client'}"`,
       t.trip_type,
       t.one_side_km,
@@ -176,7 +176,7 @@ export default function DriverHistoryPage() {
                     <tr key={trip.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="font-semibold text-slate-900">{formatDateIST(trip.trip_date)}</div>
-                        <div className="text-xs text-slate-400">{formatTimeIST(trip.created_at)}</div>
+                        <div className="text-xs text-slate-400 font-mono">{formatTripTime(trip)}</div>
                       </td>
                       <td className="py-3.5 px-4">
                         {isUber ? (

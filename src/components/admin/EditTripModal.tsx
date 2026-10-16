@@ -8,13 +8,14 @@ import { createClient, isLiveSupabaseConfigured } from '@/lib/supabase/client';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { formatCurrencyINR, getTodayDateIST } from '@/lib/timezone';
+import { formatCurrencyINR, getTodayDateIST, getCurrentTime24IST, formatTimeIST } from '@/lib/timezone';
 import {
   Navigation,
   User,
   Building2,
   Car,
   Calendar,
+  Clock,
   Layers,
   Calculator,
   Trash2,
@@ -47,6 +48,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
   const [companyId, setCompanyId] = useState<string>('');
   const [vehicleId, setVehicleId] = useState<string>('');
   const [tripDate, setTripDate] = useState<string>('');
+  const [tripTime, setTripTime] = useState<string>('');
   const [tripType, setTripType] = useState<TripType>('ONE_SIDE');
   const [oneSideKm, setOneSideKm] = useState<string>('');
   const [customTotalKm, setCustomTotalKm] = useState<string>('');
@@ -177,6 +179,10 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
       // Clean formatted date YYYY-MM-DD
       const rawDate = item.trip_date || (item.created_at ? item.created_at.split('T')[0] : getTodayDateIST());
       setTripDate(rawDate.split('T')[0]);
+      const rawTime = (item as any)?.trip_time
+        ? (item as any).trip_time.slice(0, 5)
+        : (item.created_at ? formatTimeIST(item.created_at) : getCurrentTime24IST());
+      setTripTime(rawTime);
 
       // Check if Uber entry
       if (
@@ -348,6 +354,8 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
     setErrorMessage(null);
 
     try {
+      const formattedTripTime = tripTime ? (tripTime.length === 5 ? `${tripTime}:00` : tripTime) : undefined;
+
       // 1. Update in FleetStore (local + browser Supabase client)
       await FleetStore.updateTripAsync(cleanTripId, {
         driver_id: driverId,
@@ -358,6 +366,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
         multiplier,
         total_km: effectiveTotalKm,
         trip_date: tripDate,
+        trip_time: formattedTripTime,
         notes: cleanNotes || undefined,
       });
 
@@ -372,6 +381,7 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
         multiplier,
         totalKm: effectiveTotalKm,
         tripDate,
+        tripTime: formattedTripTime,
         notes: cleanNotes || undefined,
       });
 
@@ -560,19 +570,33 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
           </div>
         )}
 
-        {/* 3. TRIP DATE */}
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-purple-600" />
-            <span>Operational Date (Asia/Kolkata) *</span>
-          </label>
-          <input
-            type="date"
-            value={tripDate}
-            onChange={(e) => setTripDate(e.target.value)}
-            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
-            required
-          />
+        {/* 3. OPERATIONAL DATE & TIME */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-purple-600" />
+              <span>Operational Date *</span>
+            </label>
+            <input
+              type="date"
+              value={tripDate}
+              onChange={(e) => setTripDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-purple-600" />
+              <span>Trip Time (IST)</span>
+            </label>
+            <input
+              type="time"
+              value={tripTime}
+              onChange={(e) => setTripTime(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
+            />
+          </div>
         </div>
 
         {/* 4. UBER FINANCIALS (If Uber) */}
