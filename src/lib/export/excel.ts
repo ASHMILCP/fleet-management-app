@@ -95,6 +95,7 @@ export function exportWorkingHoursToExcel(
 
   const dataRows = items.map((item) => ({
     'Shift Date': item.session_date,
+    'Duty Type': item.duty_type === 'UBER' ? 'Uber Duty' : 'Navy Duty',
     'Driver Name': item.driver_name,
     'Driver Username': item.driver_username ? `@${item.driver_username}` : '',
     'Phone': item.driver_phone || '',
@@ -119,6 +120,7 @@ export function exportWorkingHoursToExcel(
 
   dataRows.push({
     'Shift Date': 'TOTAL',
+    'Duty Type': '',
     'Driver Name': '',
     'Driver Username': '',
     'Phone': '',

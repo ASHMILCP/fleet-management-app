@@ -170,14 +170,6 @@ export default function DriverDashboard() {
         {/* QUICK ACTION SHORTCUTS */}
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            variant="primary"
-            size="md"
-            onClick={() => setIsTripDialogOpen(true)}
-            leftIcon={<Navigation className="w-4 h-4" />}
-          >
-            Add Trip
-          </Button>
-          <Button
             variant="secondary"
             size="md"
             onClick={() => setIsFuelDialogOpen(true)}
@@ -212,47 +204,7 @@ export default function DriverDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ACTION TILES */}
         <div className="space-y-4 lg:col-span-1">
-          {/* Tile 1: Log Trip */}
-          <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 text-white shadow-lg shadow-blue-600/20 flex flex-col justify-between">
-            <div>
-              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
-                <Navigation className="w-6 h-6 text-white" />
-              </div>
-              <h3 className="text-lg font-bold">Log New Trip</h3>
-              <p className="text-xs text-blue-100 mt-1 leading-relaxed">
-                Record your commute or corporate ride. Select client company, enter one-way KM, and confirm total distance.
-              </p>
-            </div>
-            <button
-              onClick={() => setIsTripDialogOpen(true)}
-              className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-blue-700 font-bold text-sm hover:bg-blue-50 transition-colors shadow-sm flex items-center justify-center gap-2 group"
-            >
-              <span>Launch Trip Logger</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          {/* Tile 2: Log Fuel */}
-          <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl p-6 text-white shadow-lg shadow-amber-500/20 flex flex-col justify-between">
-            <div>
-              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
-                <Fuel className="w-6 h-6 text-white" />
-              </div>
-              <h3 className="text-lg font-bold">Log Fuel Expense</h3>
-              <p className="text-xs text-amber-100 mt-1 leading-relaxed">
-                Log CNG or Petrol refuel receipts. Updates your real-time Fuel Cost / KM efficiency ratio instantly.
-              </p>
-            </div>
-            <button
-              onClick={() => setIsFuelDialogOpen(true)}
-              className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-amber-700 font-bold text-sm hover:bg-amber-50 transition-colors shadow-sm flex items-center justify-center gap-2 group"
-            >
-              <span>Record Fuel Slip</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          {/* Tile 3: Log Uber Earnings / Rent */}
+          {/* Tile 1: Log Uber Earnings / Rent */}
           <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 text-white shadow-lg shadow-emerald-950/20 flex flex-col justify-between border border-slate-700/60">
             <div>
               <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
@@ -273,6 +225,26 @@ export default function DriverDashboard() {
               className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-emerald-50 hover:text-emerald-900 transition-colors shadow-sm flex items-center justify-center gap-2 group"
             >
               <span>Add Uber Record</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
+
+          {/* Tile 2: Log Fuel */}
+          <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl p-6 text-white shadow-lg shadow-amber-500/20 flex flex-col justify-between">
+            <div>
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4">
+                <Fuel className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-lg font-bold">Log Fuel Expense</h3>
+              <p className="text-xs text-amber-100 mt-1 leading-relaxed">
+                Log CNG or Petrol refuel receipts. Updates your real-time Fuel Cost / KM efficiency ratio instantly.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsFuelDialogOpen(true)}
+              className="mt-6 w-full py-3 px-4 rounded-xl bg-white text-amber-700 font-bold text-sm hover:bg-amber-50 transition-colors shadow-sm flex items-center justify-center gap-2 group"
+            >
+              <span>Record Fuel Slip</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>

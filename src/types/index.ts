@@ -2,6 +2,7 @@ export type UserRole = 'ADMIN' | 'DRIVER';
 export type FuelType = 'CNG' | 'PETROL';
 export type TripType = 'ONE_SIDE' | 'TWO_SIDE';
 export type DutyStatus = 'ACTIVE' | 'COMPLETED';
+export type DutyType = 'NAVY' | 'UBER';
 
 export interface Profile {
   id: string;
@@ -44,9 +45,11 @@ export interface DutySession {
   id: string;
   driver_id: string;
   vehicle_id?: string;
+  duty_type?: DutyType;
   start_time: string;
   end_time?: string | null;
   status: DutyStatus;
+  total_km?: number;
   notes?: string;
   created_at: string;
   // joined fields
@@ -111,9 +114,13 @@ export interface UberEarning {
 
 export interface DriverTodaySummary {
   dutySession: DutySession | null;
+  navyDutySession?: DutySession | null;
+  uberDutySession?: DutySession | null;
   startTime: string | null;
   endTime: string | null;
   workingHoursText: string;
+  navyWorkingHoursText?: string;
+  uberWorkingHoursText?: string;
   workingHoursDecimal: number;
   totalTrips: number;
   totalKm: number;
@@ -130,6 +137,8 @@ export interface AdminSummaryMetrics {
   totalDrivers: number;
   activeDrivers: number;
   onDutyDrivers: number;
+  onDutyNavyDrivers?: number;
+  onDutyUberDrivers?: number;
   todayTrips: number;
   todayKm: number;
   todayFuelExpense: number;
@@ -144,6 +153,7 @@ export interface ReportFilterCriteria {
   endDate: string;
   driverId: string; // 'ALL' or UUID
   companyId: string; // 'ALL' or UUID
+  dutyType?: 'ALL' | DutyType;
 }
 
 export interface DetailedReportItem {
@@ -173,6 +183,7 @@ export interface DetailedReportItem {
 export interface DutySessionReportItem {
   id: string;
   driver_id: string;
+  duty_type?: DutyType;
   driver_name: string;
   driver_username?: string;
   driver_phone?: string;
@@ -206,6 +217,7 @@ export interface LoginAuditItem {
 export interface DutyNotification {
   id: string;
   type: 'DUTY_STARTED' | 'DUTY_ENDED';
+  duty_type?: DutyType;
   driver_id: string;
   driver_name: string;
   driver_username?: string;
@@ -215,6 +227,7 @@ export interface DutyNotification {
   timestamp: string;
   duration_text?: string;
   notes?: string;
+  total_km?: number;
   read?: boolean;
 }
 

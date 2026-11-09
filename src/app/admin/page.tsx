@@ -318,7 +318,7 @@ export default function AdminDashboard() {
         <StatCard
           title="On-Duty Drivers"
           value={metrics.onDutyDrivers}
-          subtitle="Currently active shifts"
+          subtitle={`${metrics.onDutyNavyDrivers || 0} Navy • ${metrics.onDutyUberDrivers || 0} Uber`}
           icon={<Clock className="w-5 h-5" />}
           trend={metrics.onDutyDrivers > 0 ? 'Live on road' : 'Off-duty'}
           variant="emerald"
@@ -439,8 +439,8 @@ export default function AdminDashboard() {
                       </div>
 
                       <div className="flex items-center justify-between sm:flex-col sm:items-end w-full sm:w-auto pt-2 sm:pt-0 border-t border-slate-100 sm:border-t-0 pl-13 sm:pl-0">
-                        <Badge variant="warning" size="sm">
-                          ON DUTY
+                        <Badge variant={session.duty_type === 'UBER' ? 'success' : 'info'} size="sm">
+                          {session.duty_type === 'UBER' ? 'UBER DUTY' : 'NAVY DUTY'}
                         </Badge>
                         <div className="text-xs text-slate-500 mt-0.5 sm:mt-1">
                           Started: <strong className="font-mono text-slate-800">{formatTimeIST(session.start_time)}</strong>

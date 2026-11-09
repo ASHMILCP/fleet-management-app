@@ -1,15 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
 import { Trip, Profile } from '@/types';
-import { formatDateIST, formatTimeIST, formatTripTime } from '@/lib/timezone';
+import { formatDateIST, formatTripTime } from '@/lib/timezone';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EditTripDialog } from '@/components/driver/EditTripDialog';
-import { Navigation, Building2, Calendar, FileText, RefreshCw, Download, Edit2, Car } from 'lucide-react';
+import { Building2, FileText, RefreshCw, Download, Edit2, Car, Gauge, Filter } from 'lucide-react';
 
 export default function DriverHistoryPage() {
   const router = useRouter();
@@ -18,6 +18,7 @@ export default function DriverHistoryPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
   const [isEditTripOpen, setIsEditTripOpen] = useState(false);
+  const [filterType, setFilterType] = useState<'ALL' | 'NAVY' | 'UBER'>('ALL');
 
   const loadTrips = useCallback(async () => {
     setIsRefreshing(true);
@@ -46,18 +47,39 @@ export default function DriverHistoryPage() {
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
 
   // Separate corporate KM from Uber entries
-  const corporateTrips = trips.filter(
-    (t) => !t.notes?.includes('[UBER_EARNINGS:') && !companyMap.get(t.company_id)?.toLowerCase().includes('uber')
-  );
-  const totalKm = corporateTrips.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
+  const corporateTrips = useMemo(() => {
+    return trips.filter(
+      (t) => !t.notes?.includes('[UBER_EARNINGS:') && !companyMap.get(t.company_id)?.toLowerCase().includes('uber') && !t.id.startsWith('uber-')
+    );
+  }, [trips, companyMap]);
+
+  const uberTrips = useMemo(() => {
+    return trips.filter(
+      (t) => Boolean(
+        (t.notes && t.notes.includes('[UBER_EARNINGS:')) ||
+        (companyMap.get(t.company_id) || '').toLowerCase().includes('uber') ||
+        t.id.startsWith('uber-')
+      )
+    );
+  }, [trips, companyMap]);
+
+  const filteredTrips = useMemo(() => {
+    if (filterType === 'NAVY') return corporateTrips;
+    if (filterType === 'UBER') return uberTrips;
+    return trips;
+  }, [filterType, trips, corporateTrips, uberTrips]);
+
+  const totalKm = useMemo(() => {
+    return filteredTrips.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
+  }, [filteredTrips]);
 
   const handleExportCsv = () => {
-    if (trips.length === 0) {
+    if (filteredTrips.length === 0) {
       alert('No trips available to export');
       return;
     }
-    const headers = ['Date', 'Time', 'Company', 'Trip Type', 'One-Side KM', 'Multiplier', 'Total KM', 'Notes'];
-    const rows = trips.map((t) => [
+    const headers = ['Date', 'Time', 'Duty / Company', 'Type', 'One-Side KM', 'Multiplier', 'Total KM', 'Notes'];
+    const rows = filteredTrips.map((t) => [
       t.trip_date,
       formatTripTime(t),
       `"${companyMap.get(t.company_id) || 'Corporate Client'}"`,
@@ -72,7 +94,7 @@ export default function DriverHistoryPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `my-trips-${currentUser?.full_name || 'driver'}.csv`);
+    link.setAttribute('download', `my-trips-${filterType.toLowerCase()}-${currentUser?.full_name || 'driver'}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -80,13 +102,14 @@ export default function DriverHistoryPage() {
 
   return (
     <div className="space-y-6">
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-            My Trip History
+            My Trip History &amp; Distance
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Complete record of your completed trips and distance logged
+            Complete record of your completed Navy duty trips, Uber shift records, and daily KM
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -103,29 +126,71 @@ export default function DriverHistoryPage() {
             variant="secondary"
             size="sm"
             onClick={handleExportCsv}
-            disabled={trips.length === 0}
+            disabled={filteredTrips.length === 0}
             leftIcon={<Download className="w-3.5 h-3.5 text-blue-600" />}
           >
             Export CSV
           </Button>
-          <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-xl text-right">
-            <div className="text-[10px] font-bold text-blue-600 uppercase">Lifetime Distance</div>
-            <div className="text-lg font-black text-blue-950 font-mono">{totalKm.toFixed(1)} KM</div>
+          <div className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-right">
+            <div className="text-[10px] font-bold text-emerald-700 uppercase">Filtered Distance</div>
+            <div className="text-lg font-black text-emerald-950 font-mono">{totalKm.toFixed(1)} KM</div>
           </div>
           <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-            <div className="text-[10px] font-bold text-slate-600 uppercase">Total Trips</div>
-            <div className="text-lg font-black text-slate-900 font-mono">{trips.length}</div>
+            <div className="text-[10px] font-bold text-slate-600 uppercase">Total Entries</div>
+            <div className="text-lg font-black text-slate-900 font-mono">{filteredTrips.length}</div>
           </div>
         </div>
       </div>
 
+      {/* FILTER PILLS */}
+      <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-3 pr-2 flex items-center gap-1">
+          <Filter className="w-3.5 h-3.5" />
+          <span>Filter:</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setFilterType('ALL')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            filterType === 'ALL'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          All Records ({trips.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterType('NAVY')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            filterType === 'NAVY'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-blue-50'
+          }`}
+        >
+          Navy Commute Trips ({corporateTrips.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterType('UBER')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            filterType === 'UBER'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-emerald-50'
+          }`}
+        >
+          Uber Shifts &amp; Daily KM ({uberTrips.length})
+        </button>
+      </div>
+
+      {/* DATA TABLE */}
       <Card>
-        {trips.length === 0 ? (
+        {filteredTrips.length === 0 ? (
           <div className="text-center py-12 text-slate-400">
             <FileText className="w-12 h-12 mx-auto mb-2 opacity-30 stroke-[1.5]" />
-            <p className="text-base font-semibold text-slate-600">No trips on record yet</p>
+            <p className="text-base font-semibold text-slate-600">No records found for this filter</p>
             <p className="text-xs text-slate-400 mt-1">
-              Your logged trips will appear here with timestamp and company breakdown.
+              Your logged trips and daily total KM will appear here with timestamps.
             </p>
           </div>
         ) : (
@@ -134,17 +199,17 @@ export default function DriverHistoryPage() {
               <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
                 <tr>
                   <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Client Company</th>
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4 text-right">One-Side KM</th>
+                  <th className="py-3 px-4">Duty / Platform</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4 text-right">Rides / One-Side</th>
                   <th className="py-3 px-4 text-center">Multiplier</th>
-                  <th className="py-3 px-4 text-right">Total KM</th>
+                  <th className="py-3 px-4 text-right">Total KM / Amount</th>
                   <th className="py-3 px-4">Notes</th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {trips.map((trip) => {
+                {filteredTrips.map((trip) => {
                   const companyName = companyMap.get(trip.company_id) || 'Corporate Client';
                   const isUber = Boolean(
                     (trip.notes && trip.notes.includes('[UBER_EARNINGS:')) ||
@@ -172,6 +237,8 @@ export default function DriverHistoryPage() {
                     }
                   }
 
+                  const isDailyKmEntry = trip.notes?.includes('Daily Total KM Run');
+
                   return (
                     <tr key={trip.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3.5 px-4 whitespace-nowrap">
@@ -183,7 +250,7 @@ export default function DriverHistoryPage() {
                           <div className="flex items-center gap-2">
                             <Car className={`w-4 h-4 ${uberCategory === 'UBER_RENT' ? 'text-indigo-600' : 'text-emerald-600'}`} />
                             <span className="font-bold text-slate-900">
-                              {uberCategory === 'UBER_RENT' ? 'Uber Rent' : 'Uber Earnings'}
+                              {isDailyKmEntry ? 'Uber Daily KM' : (uberCategory === 'UBER_RENT' ? 'Uber Rent' : 'Uber Earnings')}
                             </span>
                           </div>
                         ) : (
@@ -195,9 +262,15 @@ export default function DriverHistoryPage() {
                       </td>
                       <td className="py-3.5 px-4">
                         {isUber ? (
-                          <Badge variant={uberCategory === 'UBER_RENT' ? 'purple' : 'success'} size="sm">
-                            {uberCategory === 'UBER_RENT' ? 'UBER RENT' : 'UBER EARNINGS'}
-                          </Badge>
+                          isDailyKmEntry ? (
+                            <Badge variant="success" size="sm">
+                              DAILY KM
+                            </Badge>
+                          ) : (
+                            <Badge variant={uberCategory === 'UBER_RENT' ? 'purple' : 'success'} size="sm">
+                              {uberCategory === 'UBER_RENT' ? 'UBER RENT' : 'UBER EARNINGS'}
+                            </Badge>
+                          )
                         ) : (
                           <Badge
                             variant={trip.trip_type === 'TWO_SIDE' ? 'purple' : 'info'}
@@ -214,12 +287,12 @@ export default function DriverHistoryPage() {
                         {isUber ? '-' : `x${trip.multiplier}`}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                        {isUber ? (
+                        {isUber && !isDailyKmEntry && uberAmount > 0 ? (
                           <span className={uberCategory === 'UBER_RENT' ? 'text-indigo-700 font-black' : 'text-emerald-700 font-black'}>
-                            ₹{uberAmount > 0 ? uberAmount.toLocaleString('en-IN') : trip.total_km}
+                            ₹{uberAmount.toLocaleString('en-IN')}
                           </span>
                         ) : (
-                          `${trip.total_km} km`
+                          <span className="text-slate-900 font-black">{trip.total_km} km</span>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-500 max-w-xs truncate">

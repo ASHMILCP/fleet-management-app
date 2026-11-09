@@ -65,6 +65,7 @@ export default function AdminReportsPage() {
   const [endDate, setEndDate] = useState<string>(today);
   const [selectedDriverId, setSelectedDriverId] = useState<string>('ALL');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
+  const [selectedDutyType, setSelectedDutyType] = useState<'ALL' | 'NAVY' | 'UBER'>('ALL');
 
   // Password visibility map for driver credentials inspection
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
@@ -89,8 +90,9 @@ export default function AdminReportsPage() {
       endDate,
       driverId: selectedDriverId,
       companyId: selectedCompanyId,
+      dutyType: selectedDutyType,
     }),
-    [startDate, endDate, selectedDriverId, selectedCompanyId]
+    [startDate, endDate, selectedDriverId, selectedCompanyId, selectedDutyType]
   );
 
   const refreshReportData = async () => {
@@ -626,25 +628,42 @@ export default function AdminReportsPage() {
             </select>
           </div>
 
-          {/* Company Filter (Active primarily on Trips tab) */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">
-              Client Company
-            </label>
-            <select
-              value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            >
-              <option value="ALL">All Companies &amp; Platforms</option>
-              <option value="UBER">🚕 Uber Platform Earnings</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Company or Duty Type Filter */}
+          {activeTab === 'hours' ? (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">
+                Duty Shift Type
+              </label>
+              <select
+                value={selectedDutyType}
+                onChange={(e) => setSelectedDutyType(e.target.value as any)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none font-semibold"
+              >
+                <option value="ALL">All Duty Shifts (Navy &amp; Uber)</option>
+                <option value="NAVY">🛡️ Navy Duty Only</option>
+                <option value="UBER">🚕 Uber Duty Only</option>
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">
+                Client Company / Platform
+              </label>
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              >
+                <option value="ALL">All Companies &amp; Platforms</option>
+                <option value="UBER">🚕 Uber Platform Earnings</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Quick Date Presets */}
@@ -1259,6 +1278,7 @@ export default function AdminReportsPage() {
                   <thead className="bg-slate-50 text-slate-600 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
                     <tr>
                       <th className="py-3.5 px-4">Shift Date</th>
+                      <th className="py-3.5 px-4">Duty Type</th>
                       <th className="py-3.5 px-4">Driver Name</th>
                       <th className="py-3.5 px-4">Vehicle Plate</th>
                       <th className="py-3.5 px-4">Shift Start (IST)</th>
@@ -1275,6 +1295,11 @@ export default function AdminReportsPage() {
                       <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap">
                           {formatDateIST(item.session_date)}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <Badge variant={item.duty_type === 'UBER' ? 'success' : 'info'} size="sm">
+                            {item.duty_type === 'UBER' ? 'UBER DUTY' : 'NAVY DUTY'}
+                          </Badge>
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="font-bold text-slate-900">{item.driver_name}</div>
@@ -1331,7 +1356,7 @@ export default function AdminReportsPage() {
                   <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-900">
                     <tr>
                       <td className="py-3.5 px-4 uppercase text-xs">Total Shift Hours</td>
-                      <td colSpan={4} className="py-3.5 px-4 text-xs text-slate-500">
+                      <td colSpan={5} className="py-3.5 px-4 text-xs text-slate-500">
                         {workingHoursItems.length} recorded shifts &bull; Average shift: {avgShiftText}
                       </td>
                       <td className="py-3.5 px-4 text-center font-mono text-sm font-black text-blue-900">
@@ -1368,9 +1393,14 @@ export default function AdminReportsPage() {
                           <div className="text-[11px] text-slate-400 font-mono">@{item.driver_username}</div>
                         )}
                       </div>
-                      <Badge variant={item.status === 'ACTIVE' ? 'success' : 'neutral'} size="sm">
-                        {item.status === 'ACTIVE' ? 'Active Shift' : 'Completed'}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant={item.duty_type === 'UBER' ? 'success' : 'info'} size="sm">
+                          {item.duty_type === 'UBER' ? 'UBER' : 'NAVY'}
+                        </Badge>
+                        <Badge variant={item.status === 'ACTIVE' ? 'success' : 'neutral'} size="sm">
+                          {item.status === 'ACTIVE' ? 'Active' : 'Ended'}
+                        </Badge>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200/60 font-mono">

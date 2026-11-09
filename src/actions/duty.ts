@@ -1,10 +1,16 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { getTodayDateIST } from '@/lib/timezone';
+import { getTodayDateIST, formatTimeIST } from '@/lib/timezone';
 import { revalidatePath } from 'next/cache';
+import { DutyType } from '@/types';
 
-export async function startDutySession(driverId: string, vehicleId?: string, notes?: string) {
+export async function startDutySession(
+  driverId: string,
+  vehicleId?: string,
+  notes?: string,
+  dutyType: DutyType = 'NAVY'
+) {
   try {
     const supabase = await createClient();
     const nowIso = new Date().toISOString();
@@ -21,9 +27,10 @@ export async function startDutySession(driverId: string, vehicleId?: string, not
     }
 
     // Close any existing active session (end_time is null)
+    // If starting UBER, explicitly mark any open NAVY session as auto-ended
     const { data: openSessions } = await supabase
       .from('duty_sessions')
-      .select('id, start_time')
+      .select('id, start_time, duty_type, notes')
       .eq('driver_id', driverId)
       .is('end_time', null);
 
@@ -31,11 +38,20 @@ export async function startDutySession(driverId: string, vehicleId?: string, not
       for (const open of openSessions) {
         const diffMs = open.start_time ? new Date(nowIso).getTime() - new Date(open.start_time).getTime() : 0;
         const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+        const prevDutyType = open.duty_type || 'NAVY';
+        let autoNote = open.notes || '';
+        if (prevDutyType === 'NAVY' && dutyType === 'UBER') {
+          autoNote = (autoNote ? `${autoNote} | ` : '') + `[Auto-ended: Switched to Uber at ${formatTimeIST(nowIso)}]`;
+        } else if (prevDutyType === 'UBER' && dutyType === 'NAVY') {
+          autoNote = (autoNote ? `${autoNote} | ` : '') + `[Auto-ended: Switched to Navy Duty at ${formatTimeIST(nowIso)}]`;
+        }
+
         await supabase
           .from('duty_sessions')
           .update({
             end_time: nowIso,
             total_working_minutes: totalMinutes,
+            notes: autoNote || undefined,
           })
           .eq('id', open.id);
       }
@@ -45,9 +61,12 @@ export async function startDutySession(driverId: string, vehicleId?: string, not
       .from('duty_sessions')
       .insert({
         driver_id: driverId,
+        vehicle_id: vehicleId || null,
+        duty_type: dutyType,
         session_date: getTodayDateIST(),
         start_time: nowIso,
         end_time: null,
+        notes: notes || null,
       })
       .select()
       .single();
@@ -61,26 +80,42 @@ export async function startDutySession(driverId: string, vehicleId?: string, not
   }
 }
 
-export async function endDutySession(sessionId: string) {
+export async function endDutySession(
+  sessionId: string,
+  totalKm?: number,
+  notes?: string
+) {
   try {
     const supabase = await createClient();
     const nowIso = new Date().toISOString();
 
     const { data: session } = await supabase
       .from('duty_sessions')
-      .select('id, start_time')
+      .select('id, start_time, notes')
       .eq('id', sessionId)
       .maybeSingle();
 
     const diffMs = session?.start_time ? new Date(nowIso).getTime() - new Date(session.start_time).getTime() : 0;
     const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
+    const updatedNotes = notes
+      ? (session?.notes ? `${session.notes} | ${notes}` : notes)
+      : session?.notes;
+
+    const updatePayload: Record<string, any> = {
+      end_time: nowIso,
+      total_working_minutes: totalMinutes,
+    };
+    if (totalKm !== undefined && totalKm !== null && !isNaN(totalKm)) {
+      updatePayload.total_km = totalKm;
+    }
+    if (updatedNotes) {
+      updatePayload.notes = updatedNotes;
+    }
+
     const { data, error } = await supabase
       .from('duty_sessions')
-      .update({
-        end_time: nowIso,
-        total_working_minutes: totalMinutes,
-      })
+      .update(updatePayload)
       .eq('id', sessionId)
       .select()
       .single();

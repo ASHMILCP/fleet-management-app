@@ -5,6 +5,7 @@ import {
   Vehicle,
   Company,
   DutySession,
+  DutyType,
   Trip,
   TripType,
   FuelLog,
@@ -1275,9 +1276,11 @@ export class FleetStore {
             id: d.id,
             driver_id: d.driver_id,
             vehicle_id: d.vehicle_id,
+            duty_type: (d.duty_type as DutyType) || 'NAVY',
             start_time: d.start_time,
             end_time: d.end_time,
             status: !d.end_time ? 'ACTIVE' : 'COMPLETED',
+            total_km: Number(d.total_km || 0),
             notes: d.notes,
             created_at: d.created_at || d.start_time,
           }));
@@ -1292,7 +1295,12 @@ export class FleetStore {
   }
 
   static getDutySessions(): DutySession[] {
-    return getItem<DutySession[]>(STORAGE_KEYS.DUTY_SESSIONS, INITIAL_DUTY_SESSIONS);
+    const raw = getItem<DutySession[]>(STORAGE_KEYS.DUTY_SESSIONS, INITIAL_DUTY_SESSIONS);
+    return raw.map((s) => ({
+      ...s,
+      duty_type: s.duty_type || 'NAVY',
+      total_km: Number(s.total_km || 0),
+    }));
   }
 
   static async getActiveDutySessionAsync(driverId: string): Promise<DutySession | null> {
@@ -1313,9 +1321,11 @@ export class FleetStore {
             id: data.id,
             driver_id: data.driver_id,
             vehicle_id: data.vehicle_id,
+            duty_type: (data.duty_type as DutyType) || 'NAVY',
             start_time: data.start_time,
             end_time: data.end_time,
             status: 'ACTIVE',
+            total_km: Number(data.total_km || 0),
             notes: data.notes,
             created_at: data.created_at || data.start_time,
           };
@@ -1336,16 +1346,24 @@ export class FleetStore {
     );
   }
 
-  static async startDutyAsync(driverId: string, vehicleId?: string, notes?: string): Promise<DutySession> {
+  static async startDutyAsync(
+    driverId: string,
+    vehicleId?: string,
+    notes?: string,
+    dutyType: DutyType = 'NAVY'
+  ): Promise<DutySession> {
+    const nowIso = new Date().toISOString();
     const newSession: DutySession = {
       id: generateUUID(),
       driver_id: driverId,
       vehicle_id: vehicleId,
-      start_time: new Date().toISOString(),
+      duty_type: dutyType,
+      start_time: nowIso,
       end_time: null,
       status: 'ACTIVE',
+      total_km: 0,
       notes: notes || undefined,
-      created_at: new Date().toISOString(),
+      created_at: nowIso,
     };
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
@@ -1365,17 +1383,45 @@ export class FleetStore {
           }
         }
 
-        // Close any currently active sessions for this driver in Supabase
-        await supabase.from('duty_sessions').update({
-          end_time: new Date().toISOString(),
-        }).eq('driver_id', driverId).is('end_time', null);
+        // Fetch any currently active sessions for this driver to auto-end them
+        const { data: openSessions } = await supabase
+          .from('duty_sessions')
+          .select('id, start_time, duty_type, notes')
+          .eq('driver_id', driverId)
+          .is('end_time', null);
+
+        if (openSessions && openSessions.length > 0) {
+          for (const open of openSessions) {
+            const diffMs = open.start_time ? new Date(nowIso).getTime() - new Date(open.start_time).getTime() : 0;
+            const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+            const prevType = open.duty_type || 'NAVY';
+            let autoNote = open.notes || '';
+            if (prevType === 'NAVY' && dutyType === 'UBER') {
+              autoNote = (autoNote ? `${autoNote} | ` : '') + `[Auto-ended: Switched to Uber at ${formatTimeIST(nowIso)}]`;
+            } else if (prevType === 'UBER' && dutyType === 'NAVY') {
+              autoNote = (autoNote ? `${autoNote} | ` : '') + `[Auto-ended: Switched to Navy Duty at ${formatTimeIST(nowIso)}]`;
+            }
+
+            await supabase
+              .from('duty_sessions')
+              .update({
+                end_time: nowIso,
+                total_working_minutes: totalMinutes,
+                notes: autoNote || undefined,
+              })
+              .eq('id', open.id);
+          }
+        }
 
         const { data, error } = await supabase.from('duty_sessions').insert({
           id: newSession.id,
           driver_id: newSession.driver_id,
+          vehicle_id: newSession.vehicle_id,
+          duty_type: newSession.duty_type,
           session_date: getTodayDateIST(),
           start_time: newSession.start_time,
           end_time: null,
+          notes: newSession.notes,
         }).select().single();
 
         if (error) {
@@ -1392,7 +1438,13 @@ export class FleetStore {
     sessions.forEach((s) => {
       if (s.driver_id === driverId && s.status === 'ACTIVE') {
         s.status = 'COMPLETED';
-        s.end_time = new Date().toISOString();
+        s.end_time = nowIso;
+        const prevType = s.duty_type || 'NAVY';
+        if (prevType === 'NAVY' && dutyType === 'UBER') {
+          s.notes = (s.notes ? `${s.notes} | ` : '') + `[Auto-ended: Switched to Uber at ${formatTimeIST(nowIso)}]`;
+        } else if (prevType === 'UBER' && dutyType === 'NAVY') {
+          s.notes = (s.notes ? `${s.notes} | ` : '') + `[Auto-ended: Switched to Navy Duty at ${formatTimeIST(nowIso)}]`;
+        }
       }
     });
     sessions.unshift(newSession);
@@ -1401,25 +1453,37 @@ export class FleetStore {
     return newSession;
   }
 
-  static startDuty(driverId: string, vehicleId?: string, notes?: string): DutySession {
-    this.startDutyAsync(driverId, vehicleId, notes);
+  static startDuty(
+    driverId: string,
+    vehicleId?: string,
+    notes?: string,
+    dutyType: DutyType = 'NAVY'
+  ): DutySession {
+    this.startDutyAsync(driverId, vehicleId, notes, dutyType);
     const sessions = this.getDutySessions();
     return sessions[0] || {
       id: generateUUID(),
       driver_id: driverId,
       vehicle_id: vehicleId,
+      duty_type: dutyType,
       start_time: new Date().toISOString(),
       end_time: null,
       status: 'ACTIVE',
+      total_km: 0,
       notes,
       created_at: new Date().toISOString(),
     };
   }
 
-  static async endDutyAsync(driverId: string): Promise<DutySession | null> {
+  static async endDutyAsync(
+    driverId: string,
+    totalKm?: number,
+    notes?: string
+  ): Promise<DutySession | null> {
     const sessions = this.getDutySessions();
     const active = sessions.find((s) => s.driver_id === driverId && s.status === 'ACTIVE');
     const nowIso = new Date().toISOString();
+    const parsedKm = totalKm !== undefined && totalKm !== null && !isNaN(Number(totalKm)) ? Number(totalKm) : undefined;
 
     if (typeof window !== 'undefined' && isLiveSupabaseConfigured()) {
       try {
@@ -1427,16 +1491,21 @@ export class FleetStore {
         const diffMs = active?.start_time ? new Date(nowIso).getTime() - new Date(active.start_time).getTime() : 0;
         const totalMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
+        const updatedNotes = notes
+          ? (active?.notes ? `${active.notes} | ${notes}` : notes)
+          : active?.notes;
+
+        const updatePayload: Record<string, any> = {
+          end_time: nowIso,
+          total_working_minutes: totalMinutes,
+        };
+        if (parsedKm !== undefined) updatePayload.total_km = parsedKm;
+        if (updatedNotes) updatePayload.notes = updatedNotes;
+
         if (active?.id) {
-          await supabase.from('duty_sessions').update({
-            end_time: nowIso,
-            total_working_minutes: totalMinutes,
-          }).eq('id', active.id);
+          await supabase.from('duty_sessions').update(updatePayload).eq('id', active.id);
         } else {
-          await supabase.from('duty_sessions').update({
-            end_time: nowIso,
-            total_working_minutes: totalMinutes,
-          }).eq('driver_id', driverId).is('end_time', null);
+          await supabase.from('duty_sessions').update(updatePayload).eq('driver_id', driverId).is('end_time', null);
         }
       } catch (err) {
         console.error('Supabase endDutyAsync error:', err);
@@ -1446,18 +1515,43 @@ export class FleetStore {
     if (active) {
       active.status = 'COMPLETED';
       active.end_time = nowIso;
+      if (parsedKm !== undefined) active.total_km = parsedKm;
+      if (notes) active.notes = active.notes ? `${active.notes} | ${notes}` : notes;
       setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
+
+      // If logging out of Uber with Daily Total KM run today, also record it as an Uber platform trip log
+      // so it immediately populates the existing reports, KM trackers, and driver history on both portals
+      if (active.duty_type === 'UBER' && parsedKm && parsedKm > 0) {
+        const companies = this.getCompanies();
+        const uberComp = companies.find((c) => (c.name || '').toLowerCase().includes('uber'));
+        const uberCompId = uberComp?.id || '9047dffb-994d-459f-a221-334cb5296a38';
+        const today = getTodayDateIST();
+
+        this.addTripAsync({
+          driver_id: driverId,
+          company_id: uberCompId,
+          vehicle_id: active.vehicle_id,
+          duty_session_id: active.id,
+          one_side_km: parsedKm,
+          trip_type: 'ONE_SIDE',
+          multiplier: 1,
+          total_km: parsedKm,
+          trip_date: today,
+          notes: `Daily Total KM Run (Uber Shift: ${formatTimeIST(active.start_time)} - ${formatTimeIST(nowIso)})` + (notes ? ` | ${notes}` : ''),
+        }).catch((err) => console.warn('Auto-log Uber daily KM error:', err));
+      }
     }
     return active || null;
   }
 
-  static endDuty(driverId: string): DutySession | null {
-    this.endDutyAsync(driverId);
+  static endDuty(driverId: string, totalKm?: number, notes?: string): DutySession | null {
+    this.endDutyAsync(driverId, totalKm, notes);
     const sessions = this.getDutySessions();
     const active = sessions.find((s) => s.driver_id === driverId && s.status === 'ACTIVE');
     if (active) {
       active.status = 'COMPLETED';
       active.end_time = new Date().toISOString();
+      if (totalKm !== undefined && !isNaN(Number(totalKm))) active.total_km = Number(totalKm);
       setItem(STORAGE_KEYS.DUTY_SESSIONS, sessions);
     }
     return active || null;
@@ -2303,10 +2397,37 @@ export class FleetStore {
         const endTime = primarySession?.end_time || null;
         const working = calculateWorkingHours(startTime, endTime);
 
+        // Separate Navy and Uber sessions
+        const navySessions = todaySessions.filter((s: any) => (s.duty_type || 'NAVY') === 'NAVY');
+        const uberSessions = todaySessions.filter((s: any) => s.duty_type === 'UBER');
+
+        const activeNavy = navySessions.find((s: any) => !s.end_time) || null;
+        const activeUber = uberSessions.find((s: any) => !s.end_time) || null;
+
+        const navyMinutes = navySessions.reduce((sum: number, s: any) => {
+          const w = calculateWorkingHours(s.start_time, s.end_time);
+          return sum + (s.total_working_minutes ? Number(s.total_working_minutes) : w.totalMinutes);
+        }, 0);
+        const navyWorkingHoursText = `${Math.floor(navyMinutes / 60)}h ${(navyMinutes % 60).toString().padStart(2, '0')}m`;
+
+        const uberMinutes = uberSessions.reduce((sum: number, s: any) => {
+          const w = calculateWorkingHours(s.start_time, s.end_time);
+          return sum + (s.total_working_minutes ? Number(s.total_working_minutes) : w.totalMinutes);
+        }, 0);
+        const uberWorkingHoursText = `${Math.floor(uberMinutes / 60)}h ${(uberMinutes % 60).toString().padStart(2, '0')}m`;
+
+        const totalCombinedMinutes = navyMinutes + uberMinutes;
+        const combinedWorkingHoursText = totalCombinedMinutes > 0
+          ? `${Math.floor(totalCombinedMinutes / 60)}h ${(totalCombinedMinutes % 60).toString().padStart(2, '0')}m`
+          : (working?.text || '0h 00m');
+
         const rawTrips = Array.isArray(tRes.data) ? tRes.data : [];
         const trips = rawTrips.filter((t: any) => !deletedIds.has(t.id));
         const totalTrips = trips.length;
-        const totalKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
+        const tripsKm = trips.reduce((sum: number, t: any) => sum + Number(t.total_km || 0), 0);
+        const sessionsKm = todaySessions.reduce((sum: number, s: any) => sum + Number(s.total_km || 0), 0);
+        // Include KM from trips and from daily total KM logged on duty sessions
+        const totalKm = Math.max(tripsKm, sessionsKm > 0 ? (tripsKm + sessionsKm) : tripsKm);
 
         const rawFuel = Array.isArray(fRes.data) ? fRes.data : [];
         const fuel = rawFuel.filter((f: any) => !deletedIds.has(f.id));
@@ -2377,16 +2498,66 @@ export class FleetStore {
             id: primarySession.id,
             driver_id: primarySession.driver_id,
             vehicle_id: primarySession.vehicle_id,
+            duty_type: (primarySession.duty_type as DutyType) || 'NAVY',
             start_time: primarySession.start_time,
             end_time: primarySession.end_time,
             status: primarySession.end_time ? 'COMPLETED' : 'ACTIVE',
+            total_km: Number(primarySession.total_km || 0),
             notes: primarySession.notes,
             created_at: primarySession.created_at || primarySession.start_time,
           } : null,
+          navyDutySession: activeNavy ? {
+            id: activeNavy.id,
+            driver_id: activeNavy.driver_id,
+            vehicle_id: activeNavy.vehicle_id,
+            duty_type: 'NAVY',
+            start_time: activeNavy.start_time,
+            end_time: activeNavy.end_time,
+            status: activeNavy.end_time ? 'COMPLETED' : 'ACTIVE',
+            total_km: Number(activeNavy.total_km || 0),
+            notes: activeNavy.notes,
+            created_at: activeNavy.created_at || activeNavy.start_time,
+          } : (navySessions[0] ? {
+            id: navySessions[0].id,
+            driver_id: navySessions[0].driver_id,
+            vehicle_id: navySessions[0].vehicle_id,
+            duty_type: 'NAVY',
+            start_time: navySessions[0].start_time,
+            end_time: navySessions[0].end_time,
+            status: navySessions[0].end_time ? 'COMPLETED' : 'ACTIVE',
+            total_km: Number(navySessions[0].total_km || 0),
+            notes: navySessions[0].notes,
+            created_at: navySessions[0].created_at || navySessions[0].start_time,
+          } : null),
+          uberDutySession: activeUber ? {
+            id: activeUber.id,
+            driver_id: activeUber.driver_id,
+            vehicle_id: activeUber.vehicle_id,
+            duty_type: 'UBER',
+            start_time: activeUber.start_time,
+            end_time: activeUber.end_time,
+            status: activeUber.end_time ? 'COMPLETED' : 'ACTIVE',
+            total_km: Number(activeUber.total_km || 0),
+            notes: activeUber.notes,
+            created_at: activeUber.created_at || activeUber.start_time,
+          } : (uberSessions[0] ? {
+            id: uberSessions[0].id,
+            driver_id: uberSessions[0].driver_id,
+            vehicle_id: uberSessions[0].vehicle_id,
+            duty_type: 'UBER',
+            start_time: uberSessions[0].start_time,
+            end_time: uberSessions[0].end_time,
+            status: uberSessions[0].end_time ? 'COMPLETED' : 'ACTIVE',
+            total_km: Number(uberSessions[0].total_km || 0),
+            notes: uberSessions[0].notes,
+            created_at: uberSessions[0].created_at || uberSessions[0].start_time,
+          } : null),
           startTime,
           endTime,
-          workingHoursText: working?.text || '0h 00m',
-          workingHoursDecimal: working?.hoursDecimal || 0,
+          workingHoursText: combinedWorkingHoursText,
+          navyWorkingHoursText,
+          uberWorkingHoursText,
+          workingHoursDecimal: parseFloat((totalCombinedMinutes / 60).toFixed(2)),
           totalTrips,
           totalKm,
           fuelExpense,
@@ -2417,15 +2588,40 @@ export class FleetStore {
 
     const startTime = primarySession ? primarySession.start_time : null;
     const endTime = primarySession?.end_time || null;
-
     const working = calculateWorkingHours(startTime, endTime);
+
+    // Separate Navy and Uber sessions
+    const navySessions = sessions.filter((s) => (s.duty_type || 'NAVY') === 'NAVY');
+    const uberSessions = sessions.filter((s) => s.duty_type === 'UBER');
+
+    const activeNavy = navySessions.find((s) => s.status === 'ACTIVE') || null;
+    const activeUber = uberSessions.find((s) => s.status === 'ACTIVE') || null;
+
+    const navyMinutes = navySessions.reduce((sum, s) => {
+      const w = calculateWorkingHours(s.start_time, s.end_time);
+      return sum + w.totalMinutes;
+    }, 0);
+    const navyWorkingHoursText = `${Math.floor(navyMinutes / 60)}h ${(navyMinutes % 60).toString().padStart(2, '0')}m`;
+
+    const uberMinutes = uberSessions.reduce((sum, s) => {
+      const w = calculateWorkingHours(s.start_time, s.end_time);
+      return sum + w.totalMinutes;
+    }, 0);
+    const uberWorkingHoursText = `${Math.floor(uberMinutes / 60)}h ${(uberMinutes % 60).toString().padStart(2, '0')}m`;
+
+    const totalCombinedMinutes = navyMinutes + uberMinutes;
+    const combinedWorkingHoursText = totalCombinedMinutes > 0
+      ? `${Math.floor(totalCombinedMinutes / 60)}h ${(totalCombinedMinutes % 60).toString().padStart(2, '0')}m`
+      : (working?.text || '0h 00m');
 
     const allTrips = this.getTrips();
     const driverTripsToday = Array.isArray(allTrips)
       ? allTrips.filter((t) => t && t.driver_id === driverId && t.trip_date === today)
       : [];
     const totalTrips = driverTripsToday.length;
-    const totalKm = driverTripsToday.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
+    const tripsKm = driverTripsToday.reduce((sum, t) => sum + Number(t.total_km || 0), 0);
+    const sessionKm = sessions.reduce((sum, s) => sum + Number(s.total_km || 0), 0);
+    const totalKm = Math.max(tripsKm, sessionKm > 0 ? tripsKm + sessionKm : tripsKm);
 
     const allFuel = this.getFuelLogs();
     const driverFuelToday = Array.isArray(allFuel)
@@ -2470,10 +2666,14 @@ export class FleetStore {
 
     return {
       dutySession: primarySession,
+      navyDutySession: activeNavy || navySessions[0] || null,
+      uberDutySession: activeUber || uberSessions[0] || null,
       startTime,
       endTime,
-      workingHoursText: working?.text || '0h 00m',
-      workingHoursDecimal: working?.hoursDecimal || 0,
+      workingHoursText: combinedWorkingHoursText,
+      navyWorkingHoursText,
+      uberWorkingHoursText,
+      workingHoursDecimal: parseFloat((totalCombinedMinutes / 60).toFixed(2)),
       totalTrips,
       totalKm,
       fuelExpense,
@@ -2509,7 +2709,10 @@ export class FleetStore {
         const deletedIds = getDeletedEntityIds();
         const rawDuty = Array.isArray(dRes.data) ? dRes.data : [];
         const duty = rawDuty.filter((s: any) => !deletedIds.has(s.id));
-        const onDutyDrivers = duty.filter((s: any) => !s.end_time).length;
+        const activeDutySessions = duty.filter((s: any) => !s.end_time);
+        const onDutyDrivers = activeDutySessions.length;
+        const onDutyNavyDrivers = activeDutySessions.filter((s: any) => (s.duty_type || 'NAVY') === 'NAVY').length;
+        const onDutyUberDrivers = activeDutySessions.filter((s: any) => s.duty_type === 'UBER').length;
 
         const rawTrips = Array.isArray(tRes.data) ? tRes.data : [];
         const trips = rawTrips.filter((t: any) => !deletedIds.has(t.id));
@@ -2581,6 +2784,8 @@ export class FleetStore {
           totalDrivers,
           activeDrivers,
           onDutyDrivers,
+          onDutyNavyDrivers,
+          onDutyUberDrivers,
           todayTrips,
           todayKm,
           todayFuelExpense,
@@ -2608,6 +2813,8 @@ export class FleetStore {
       (s) => s.status === 'ACTIVE' && activeDriverIds.has(s.driver_id)
     );
     const onDutyDrivers = activeSessions.length;
+    const onDutyNavyDrivers = activeSessions.filter((s) => (s.duty_type || 'NAVY') === 'NAVY').length;
+    const onDutyUberDrivers = activeSessions.filter((s) => s.duty_type === 'UBER').length;
 
     const tripsToday = this.getTrips().filter((t) => t.trip_date === today);
     const todayTrips = tripsToday.length;
@@ -2649,6 +2856,8 @@ export class FleetStore {
       totalDrivers,
       activeDrivers,
       onDutyDrivers,
+      onDutyNavyDrivers,
+      onDutyUberDrivers,
       todayTrips,
       todayKm,
       todayFuelExpense,
@@ -3218,6 +3427,11 @@ export class FleetStore {
       // Filter by driver
       if (filters.driverId !== 'ALL' && s.driver_id !== filters.driverId) continue;
 
+      const sessionDutyType: DutyType = (s.duty_type as DutyType) || 'NAVY';
+
+      // Filter by duty type (NAVY vs UBER)
+      if (filters.dutyType && filters.dutyType !== 'ALL' && sessionDutyType !== filters.dutyType) continue;
+
       const duration = calculateWorkingHours(s.start_time, s.end_time);
       const totalMinutes = s.total_working_minutes ? Number(s.total_working_minutes) : duration.totalMinutes;
 
@@ -3230,11 +3444,14 @@ export class FleetStore {
       const matchingTrips = trips.filter((t) =>
         t.duty_session_id === s.id || (t.driver_id === s.driver_id && t.trip_date === sessionDate)
       );
-      const totalKm = matchingTrips.reduce((sum, t) => sum + (t.total_km || 0), 0);
+      const tripsKm = matchingTrips.reduce((sum, t) => sum + (t.total_km || 0), 0);
+      const explicitSessionKm = Number(s.total_km || 0);
+      const finalTotalKm = explicitSessionKm > 0 ? explicitSessionKm : tripsKm;
 
       items.push({
         id: s.id,
         driver_id: s.driver_id,
+        duty_type: sessionDutyType,
         driver_name: driver?.full_name || 'Driver',
         driver_username: driver?.username,
         driver_phone: driver?.phone,
@@ -3247,7 +3464,7 @@ export class FleetStore {
         vehicle_model: vehicle?.model,
         status: s.end_time ? 'COMPLETED' : 'ACTIVE',
         trips_count: matchingTrips.length,
-        total_km: totalKm,
+        total_km: finalTotalKm,
         notes: s.notes,
         created_at: s.created_at || s.start_time,
       });

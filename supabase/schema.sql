@@ -56,9 +56,11 @@ CREATE TABLE IF NOT EXISTS public.duty_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     driver_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     vehicle_id UUID REFERENCES public.vehicles(id) ON DELETE SET NULL,
+    duty_type VARCHAR(20) NOT NULL DEFAULT 'NAVY',
     start_time TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now()),
     end_time TIMESTAMPTZ,
     status duty_status_enum NOT NULL DEFAULT 'ACTIVE',
+    total_km NUMERIC(10, 2) DEFAULT 0.00,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())

@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   TrendingUp,
+  Car,
 } from 'lucide-react';
 
 interface TodaySummaryCardProps {
@@ -24,9 +25,13 @@ interface TodaySummaryCardProps {
 export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) => {
   const {
     dutySession,
+    navyDutySession,
+    uberDutySession,
     startTime,
     endTime,
     workingHoursText,
+    navyWorkingHoursText,
+    uberWorkingHoursText,
     totalTrips,
     totalKm,
     fuelExpense,
@@ -39,6 +44,8 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
   } = summary;
 
   const isOnDuty = dutySession?.status === 'ACTIVE';
+  const isNavyActive = isOnDuty && (dutySession?.duty_type || 'NAVY') === 'NAVY';
+  const isUberActive = isOnDuty && dutySession?.duty_type === 'UBER';
 
   return (
     <Card
@@ -50,22 +57,27 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
       }
       subtitle="Real-time shift metrics calculated in Asia/Kolkata timezone"
       action={
-        dutySession ? (
-          isOnDuty ? (
-            <Badge variant="warning" size="sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-              On Duty Shift
+        isOnDuty ? (
+          isUberActive ? (
+            <Badge variant="success" size="sm" className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Uber Duty Active
             </Badge>
           ) : (
-            <Badge variant="success" size="sm">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Duty Completed
+            <Badge variant="info" size="sm" className="bg-blue-100 text-blue-800 border-blue-300 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+              Navy Duty Active
             </Badge>
           )
+        ) : dutySession ? (
+          <Badge variant="success" size="sm">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Duty Completed
+          </Badge>
         ) : (
           <Badge variant="neutral" size="sm">
             <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
-            No Shift Started
+            Off Duty
           </Badge>
         )
       }
@@ -96,41 +108,31 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
             <div className="mt-1.5 text-[10px] text-slate-400">Asia/Kolkata (IST)</div>
           </div>
 
-          {/* 2. WORKING HOURS */}
+          {/* 2. WORKING HOURS (NAVY & UBER BREAKDOWN) */}
           <div className="bg-blue-50/50 border border-blue-100 p-3.5 rounded-2xl flex flex-col justify-between">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 uppercase tracking-wider">
               <Clock className="w-3.5 h-3.5 text-blue-500" />
               <span>Working Hours</span>
             </div>
-            <div className="mt-2">
+            <div className="mt-1.5">
               <div className="text-xl sm:text-2xl font-extrabold text-blue-950 font-mono">
                 {workingHoursText}
               </div>
-              <div className="text-[11px] text-blue-600/80 font-medium">
-                {summary.workingHoursDecimal} decimal hrs
+              <div className="text-[10px] text-slate-500 mt-1 space-y-0.5">
+                <div className="flex items-center justify-between text-blue-700">
+                  <span>Navy Duty:</span>
+                  <strong className="font-mono">{navyWorkingHoursText || '0h 00m'}</strong>
+                </div>
+                <div className="flex items-center justify-between text-emerald-700">
+                  <span>Uber Duty:</span>
+                  <strong className="font-mono">{uberWorkingHoursText || '0h 00m'}</strong>
+                </div>
               </div>
             </div>
             <div className="mt-1.5 text-[10px] text-blue-400">Calculated duration</div>
           </div>
 
-          {/* 3. TOTAL TRIPS */}
-          <div className="bg-indigo-50/50 border border-indigo-100 p-3.5 rounded-2xl flex flex-col justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 uppercase tracking-wider">
-              <Navigation className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Total Trips</span>
-            </div>
-            <div className="mt-2">
-              <div className="text-xl sm:text-2xl font-extrabold text-indigo-950 font-mono">
-                {totalTrips}
-              </div>
-              <div className="text-[11px] text-indigo-600/80 font-medium">
-                Trips logged today
-              </div>
-            </div>
-            <div className="mt-1.5 text-[10px] text-indigo-400">Corporate &amp; Commute</div>
-          </div>
-
-          {/* 4. TOTAL KM */}
+          {/* 3. DAILY TOTAL KM RUN TODAY */}
           <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl flex flex-col justify-between">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 uppercase tracking-wider">
               <Gauge className="w-3.5 h-3.5 text-emerald-500" />
@@ -142,10 +144,27 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
                 <span className="text-xs font-bold text-emerald-700">KM</span>
               </div>
               <div className="text-[11px] text-emerald-700/80 font-medium">
-                Mileage recorded
+                Daily total KM run
               </div>
             </div>
-            <div className="mt-1.5 text-[10px] text-emerald-400">With multiplier applied</div>
+            <div className="mt-1.5 text-[10px] text-emerald-400">Mileage recorded today</div>
+          </div>
+
+          {/* 4. TOTAL TRIPS / SHIFTS */}
+          <div className="bg-indigo-50/50 border border-indigo-100 p-3.5 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 uppercase tracking-wider">
+              <Navigation className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Total Trips</span>
+            </div>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-extrabold text-indigo-950 font-mono">
+                {totalTrips}
+              </div>
+              <div className="text-[11px] text-indigo-600/80 font-medium">
+                Logged entries today
+              </div>
+            </div>
+            <div className="mt-1.5 text-[10px] text-indigo-400">Trips &amp; shifts</div>
           </div>
 
           {/* 5. FUEL EXPENSE */}
@@ -177,7 +196,7 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
                 <span className="text-xs font-bold text-purple-700">/KM</span>
               </div>
               <div className="text-[11px] text-purple-700/90 font-semibold truncate">
-                {totalKm > 0 ? `(₹${fuelExpense} ÷ ${totalKm} km)` : 'Awaiting trip KM'}
+                {totalKm > 0 ? `(₹${fuelExpense} ÷ ${totalKm.toFixed(1)} km)` : 'Awaiting KM'}
               </div>
             </div>
             <div className="mt-1.5 text-[10px] text-purple-500 font-medium">
@@ -225,21 +244,21 @@ export const TodaySummaryCard: React.FC<TodaySummaryCardProps> = ({ summary }) =
               </div>
             </div>
 
-            {/* Tile C: Corporate Trips Earnings */}
+            {/* Tile C: Corporate / Historical Client */}
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  Corporate Client
+                  Client / Other
                 </span>
                 <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-semibold uppercase">
-                  Trips
+                  Revenue
                 </span>
               </div>
               <div className="mt-1.5">
                 <div className="text-lg sm:text-xl font-black text-slate-900 font-mono">
                   {formatCurrencyINR(tripEarnings)}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">Client billing revenue</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Billing revenue</div>
               </div>
             </div>
 

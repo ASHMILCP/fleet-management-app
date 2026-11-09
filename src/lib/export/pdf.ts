@@ -197,6 +197,7 @@ export function exportWorkingHoursToPDF(
 
   const tableData = items.map((item) => [
     item.session_date,
+    item.duty_type === 'UBER' ? 'Uber' : 'Navy',
     item.driver_name + (item.driver_username ? ` (@${item.driver_username})` : ''),
     item.vehicle_reg || 'Unassigned',
     formatDateTimeIST(item.start_time),
@@ -214,6 +215,7 @@ export function exportWorkingHoursToPDF(
     '',
     '',
     '',
+    '',
     `${totalHours}h ${remainingMins.toString().padStart(2, '0')}m`,
     totalTrips.toString(),
     `${totalKm.toFixed(1)} km`,
@@ -226,6 +228,7 @@ export function exportWorkingHoursToPDF(
     head: [
       [
         'Shift Date',
+        'Duty',
         'Driver',
         'Vehicle Plate',
         'Shift Start (IST)',

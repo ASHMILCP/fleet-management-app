@@ -100,6 +100,7 @@ export function exportWorkingHoursToCSV(
 
   const headers = [
     'Shift Date',
+    'Duty Type',
     'Driver Name',
     'Username',
     'Phone',
@@ -116,6 +117,7 @@ export function exportWorkingHoursToCSV(
 
   const rows = items.map((item) => [
     item.session_date,
+    item.duty_type === 'UBER' ? 'Uber Duty' : 'Navy Duty',
     `"${item.driver_name.replace(/"/g, '""')}"`,
     `"${(item.driver_username ? '@' + item.driver_username : '').replace(/"/g, '""')}"`,
     `"${(item.driver_phone || '').replace(/"/g, '""')}"`,
