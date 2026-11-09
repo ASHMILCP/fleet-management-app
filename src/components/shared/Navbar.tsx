@@ -23,6 +23,7 @@ import {
   KeyRound,
   Smartphone,
   Download,
+  Fuel,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { AdminProfileModal } from '@/components/admin/AdminProfileModal';
@@ -67,7 +68,8 @@ export const Navbar: React.FC = () => {
 
   const driverNavItems = [
     { label: 'Driver Dashboard', href: '/driver', icon: <Compass className="w-4 h-4" /> },
-    { label: 'My Trip History', href: '/driver/history', icon: <FileSpreadsheet className="w-4 h-4" /> },
+    { label: 'Fuel History', href: '/driver/fuel-history', icon: <Fuel className="w-4 h-4" /> },
+    { label: 'Trip History', href: '/driver/history', icon: <FileSpreadsheet className="w-4 h-4" /> },
   ];
 
   const navItems = isAdmin ? adminNavItems : driverNavItems;

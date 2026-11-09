@@ -3,11 +3,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FleetStore } from '@/lib/store';
-import { Profile, Trip, FuelLog, UberEarning, DriverTodaySummary, Company } from '@/types';
-import { getTodayDateIST, formatTimeIST, formatTripTime, formatCurrencyINR } from '@/lib/timezone';
+import { Profile, FuelLog, UberEarning, DriverTodaySummary } from '@/types';
+import { getTodayDateIST, formatTimeIST, formatCurrencyINR } from '@/lib/timezone';
 import { DutyToggle } from '@/components/driver/DutyToggle';
-import { AddTripDialog } from '@/components/driver/AddTripDialog';
-import { EditTripDialog } from '@/components/driver/EditTripDialog';
 import { AddFuelDialog } from '@/components/driver/AddFuelDialog';
 import { AddUberEarningsDialog } from '@/components/driver/AddUberEarningsDialog';
 import { TodaySummaryCard } from '@/components/driver/TodaySummaryCard';
@@ -17,28 +15,20 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
-  Navigation,
   Fuel,
   PlusCircle,
   Car,
-  Clock,
-  Building2,
   Calendar,
-  Layers,
   ArrowRight,
-  Edit2,
   Trash2,
+  History,
 } from 'lucide-react';
 
 export default function DriverDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
-  const [isTripDialogOpen, setIsTripDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
   const [isUberDialogOpen, setIsUberDialogOpen] = useState(false);
-  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
-  const [isEditTripOpen, setIsEditTripOpen] = useState(false);
-  const [companies, setCompanies] = useState<Company[]>([]);
   const [todaySummary, setTodaySummary] = useState<DriverTodaySummary>({
     dutySession: null,
     startTime: null,
@@ -55,7 +45,6 @@ export default function DriverDashboard() {
     totalEarnings: 0,
     netEarnings: 0,
   });
-  const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [todayFuelLogs, setTodayFuelLogs] = useState<FuelLog[]>([]);
   const [todayUberLogs, setTodayUberLogs] = useState<UberEarning[]>([]);
   const [refreshIndex, setRefreshIndex] = useState(0);
@@ -68,12 +57,10 @@ export default function DriverDashboard() {
       return;
     }
     setCurrentUser(user);
-    setCompanies(FleetStore.getCompanies());
 
     try {
-      const [summary, allTrips, allFuel, allUber] = await Promise.all([
+      const [summary, allFuel, allUber] = await Promise.all([
         FleetStore.fetchDriverTodaySummaryAsync(user.id),
-        FleetStore.fetchTripsAsync(),
         FleetStore.fetchFuelLogsAsync(),
         FleetStore.fetchUberEarningsAsync(),
       ]);
@@ -81,11 +68,6 @@ export default function DriverDashboard() {
       setTodaySummary(summary);
 
       const today = getTodayDateIST();
-      const userTripsToday = allTrips.filter(
-        (t) => t.driver_id === user.id && t.trip_date === today
-      );
-      setTodayTrips(userTripsToday);
-
       const userFuelToday = allFuel.filter(
         (f) => f.driver_id === user.id && f.log_date === today
       );
@@ -107,8 +89,6 @@ export default function DriverDashboard() {
   const handleStateChange = () => {
     setRefreshIndex((prev) => prev + 1);
   };
-
-  const companyMap = new Map(companies.map((c) => [c.id, c.name]));
 
   const handleDeleteUber = async (uberId: string) => {
     if (!window.confirm('Are you sure you want to delete this Uber entry?')) return;
@@ -138,10 +118,6 @@ export default function DriverDashboard() {
     }
   };
 
-  const corporateTripsToday = todayTrips.filter(
-    (t) => !t.notes?.includes('[UBER_EARNINGS:') && !(companyMap.get(t.company_id) || '').toLowerCase().includes('uber')
-  );
-
   return (
     <div className="space-y-6">
       {/* 1. TOP WELCOME & VEHICLE HEADER */}
@@ -169,6 +145,15 @@ export default function DriverDashboard() {
 
         {/* QUICK ACTION SHORTCUTS */}
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => router.push('/driver/fuel-history')}
+            className="border-slate-200 hover:bg-slate-50 text-slate-700"
+            leftIcon={<History className="w-4 h-4 text-amber-600" />}
+          >
+            Fuel History
+          </Button>
           <Button
             variant="secondary"
             size="md"
@@ -237,7 +222,7 @@ export default function DriverDashboard() {
               </div>
               <h3 className="text-lg font-bold">Log Fuel Expense</h3>
               <p className="text-xs text-amber-100 mt-1 leading-relaxed">
-                Log CNG or Petrol refuel receipts. Updates your real-time Fuel Cost / KM efficiency ratio instantly.
+                Log CNG or Petrol refuel receipts. Record quantity and amount to track shift expenses.
               </p>
             </div>
             <button
@@ -250,7 +235,7 @@ export default function DriverDashboard() {
           </div>
         </div>
 
-        {/* RECENT TRIPS, UBER ACTIVITY & FUEL BREAKDOWN FOR TODAY */}
+        {/* RECENT UBER ACTIVITY & FUEL BREAKDOWN FOR TODAY */}
         <div className="space-y-6 lg:col-span-2">
           {/* Today's Uber Shift Records (Uber Earnings & Rent) */}
           <Card
@@ -337,88 +322,6 @@ export default function DriverDashboard() {
             )}
           </Card>
 
-          {/* Today's Corporate Trips */}
-          <Card
-            title={
-              <div className="flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-blue-600" />
-                <span>Today&apos;s Corporate Trips ({corporateTripsToday.length})</span>
-              </div>
-            }
-            subtitle="Verified client trips under active shift"
-          >
-            {corporateTripsToday.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
-                <Navigation className="w-10 h-10 mx-auto mb-2 opacity-30 stroke-[1.5]" />
-                <p className="text-sm font-medium">No corporate trips logged yet today.</p>
-                <p className="text-xs text-slate-400 mt-1">
-                  Click &ldquo;Add Trip&rdquo; above to record your completed distance.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100 overflow-x-auto">
-                {corporateTripsToday.map((trip) => {
-                  const companyName = companyMap.get(trip.company_id) || 'Corporate Client';
-                  return (
-                    <div
-                      key={trip.id}
-                      className="py-3.5 flex items-center justify-between gap-4 hover:bg-slate-50/50 rounded-xl px-2 transition-colors"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 mt-0.5">
-                          <Building2 className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">
-                            {companyName}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                            <span>Logged at {formatTripTime(trip)}</span>
-                            {trip.notes && (
-                              <>
-                                <span>&bull;</span>
-                                <span className="italic text-slate-400">{trip.notes}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right flex items-center gap-3">
-                        <Badge
-                          variant={trip.trip_type === 'ONE_SIDE' ? 'info' : 'purple'}
-                          size="sm"
-                        >
-                          {trip.trip_type === 'ONE_SIDE' ? '1-SIDE (x2)' : '2-SIDE (x1)'}
-                        </Badge>
-                        <div>
-                          <div className="text-base font-extrabold text-slate-900 font-mono">
-                            {trip.total_km} KM
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            ({trip.one_side_km} × {trip.multiplier})
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditingTrip(trip);
-                            setIsEditTripOpen(true);
-                          }}
-                          className="h-8 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-slate-200"
-                          leftIcon={<Edit2 className="w-3.5 h-3.5" />}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
           {/* Today's Fuel Logs */}
           <Card
             title={
@@ -427,12 +330,37 @@ export default function DriverDashboard() {
                 <span>Today&apos;s Fuel Log ({todayFuelLogs.length})</span>
               </div>
             }
-            subtitle="Fuel transactions used for cost/KM metric"
+            subtitle="CNG &amp; Petrol refuels recorded today"
+            action={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/driver/fuel-history')}
+                  className="h-8 px-2.5 text-xs text-amber-700 hover:text-amber-800 hover:bg-amber-50 border-amber-200"
+                  leftIcon={<History className="w-3.5 h-3.5" />}
+                >
+                  History
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsFuelDialogOpen(true)}
+                  className="h-8 px-2.5 text-xs text-amber-700 hover:text-amber-800 hover:bg-amber-50 border-amber-200"
+                  leftIcon={<PlusCircle className="w-3.5 h-3.5" />}
+                >
+                  + Add Fuel
+                </Button>
+              </div>
+            }
           >
             {todayFuelLogs.length === 0 ? (
               <div className="text-center py-6 text-slate-400">
                 <Fuel className="w-8 h-8 mx-auto mb-1 opacity-30 stroke-[1.5]" />
                 <p className="text-xs font-medium">No fuel logs recorded today.</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Click &ldquo;Add Fuel&rdquo; to record CNG or Petrol receipts.
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -482,22 +410,6 @@ export default function DriverDashboard() {
       {/* DIALOGS */}
       {currentUser && (
         <>
-          <AddTripDialog
-            driverId={currentUser.id}
-            isOpen={isTripDialogOpen}
-            onClose={() => setIsTripDialogOpen(false)}
-            onTripAdded={handleStateChange}
-          />
-          <EditTripDialog
-            trip={editingTrip}
-            driverId={currentUser.id}
-            isOpen={isEditTripOpen}
-            onClose={() => {
-              setIsEditTripOpen(false);
-              setEditingTrip(null);
-            }}
-            onTripUpdated={handleStateChange}
-          />
           <AddFuelDialog
             driverId={currentUser.id}
             isOpen={isFuelDialogOpen}
